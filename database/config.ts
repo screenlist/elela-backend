@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
 import { accountTable, chatTable, responseTable, requestsToTable, connectsWithTable, conversesWithTable } from '../canal/canal.config.ts'
-
+import { paymentFiatTable } from "../payments/payments.config.ts"
 
 export async function getSurreal(): Promise<Surreal> {
   const url = Deno.env.get('DB_URL')
@@ -125,6 +125,21 @@ export async function startUpDatabase(){
         const key = field as keyof typeof conversesWithTable.fields;
         if(presentFields.indexOf(key) < 0){
           await db.query(conversesWithTable.fields[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('payment_fiat') < 0){
+      const schema =  `${paymentFiatTable.table}\n` + Object.values(paymentFiatTable.fields).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const paymentFiat_info = await db.query<any[]>('INFO FOR TABLE payment_fiat;')
+      const presentFields = Object.entries(paymentFiat_info[0].fields).map(field => field[0])
+      for(const field in paymentFiatTable.fields){
+        const key = field as keyof typeof paymentFiatTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(paymentFiatTable.fields[key])
         }
       }
     }
