@@ -63,7 +63,6 @@ export type ConversesWith =  {
 export const accountTable = {
   table: 'DEFINE TABLE account SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE account TYPE record<account>;',
     premium_usage: 'DEFINE FIELD premium_usage ON TABLE account TYPE number;',
     premium_capacity: 'DEFINE FIELD premium_capacity ON TABLE account TYPE number;',
     standard_usage: 'DEFINE FIELD standard_usage ON TABLE account TYPE number;',
@@ -78,7 +77,6 @@ export const accountTable = {
 export const chatTable = {
   table: 'DEFINE TABLE chat SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE chat TYPE record<chat>;',
     initiator_name: `DEFINE FIELD initiator_name ON TABLE chat TYPE string DEFAULT 'Mami' READONLY;`,
     public_code: 'DEFINE FIELD public_code ON TABLE chat TYPE string;',
     start_time: 'DEFINE FIELD start_time ON TABLE chat TYPE datetime;',
@@ -91,7 +89,6 @@ export const chatTable = {
 export const responseTable = {
   table: 'DEFINE TABLE response SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE response TYPE record<response>;',
     responder_name: `DEFINE FIELD responder_name ON TABLE response TYPE string DEFAULT 'Wata' READONLY;`,
     public_code: 'DEFINE FIELD public_code ON TABLE response TYPE string;',
     secret_code: 'DEFINE FIELD secret_code ON TABLE response TYPE string;',
@@ -103,7 +100,6 @@ export const responseTable = {
 export const requestsToTable = {
   table: 'DEFINE TABLE requests_to SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE requests_to TYPE record<requests_to>;',
     in: 'DEFINE FIELD in ON TABLE requests_to TYPE record<response>;',
     out: 'DEFINE FIELD out ON TABLE requests_to TYPE record<chat>;',
     created_at: 'DEFINE FIELD created_at ON TABLE requests_to TYPE datetime DEFAULT time::now() READONLY;'
@@ -113,7 +109,6 @@ export const requestsToTable = {
 export const connectsWithTable = {
   table: 'DEFINE TABLE connects_with SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE connects_with TYPE record<connects_with>;',
     in: 'DEFINE FIELD in ON TABLE connects_with TYPE record<response>;',
     out: 'DEFINE FIELD out ON TABLE connects_with TYPE record<chat>;',
     created_at: 'DEFINE FIELD created_at ON TABLE connects_with TYPE datetime DEFAULT time::now() READONLY;'
@@ -123,7 +118,6 @@ export const connectsWithTable = {
 export const conversesWithTable = {
   table: 'DEFINE TABLE converses_with SCHEMAFULL;',
   fields: {
-    id: 'DEFINE FIELD id ON TABLE converses_with TYPE record<converses_with>;',
     in: 'DEFINE FIELD in ON TABLE converses_with TYPE record<response>;',
     out: 'DEFINE FIELD out ON TABLE converses_with TYPE record<account>;',
     chat: 'DEFINE FIELD chat ON TABLE converses_with TYPE record<chat>;',
