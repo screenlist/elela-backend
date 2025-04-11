@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
-import { accountTable, chatTable, responseTable, requestsToTable, connectsWithTable, conversesWithTable } from '../canal/canal.config.ts'
+import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable } from '../canal/canal.config.ts'
 import { paymentFiatTable } from "../payments/payments.config.ts"
 
 export async function getSurreal(): Promise<Surreal> {
@@ -39,57 +39,58 @@ export async function startUpDatabase(){
     const database_info = await db.query<any[]>('INFO FOR DB;')
     const tables = Object.entries(database_info[0].tables).map(tab => tab[0])
 
-    if(tables.indexOf('account') < 0){
-      const schema =  `${accountTable.table}\n` + Object.values(accountTable.fields).join('\n');
+    if(tables.indexOf('canal') < 0){
+      const schema =  `${canalTable.table}\n` + Object.values(canalTable.fields).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
-      const account_info = await db.query<any[]>('INFO FOR TABLE account;')
-      const presentFields = Object.entries(account_info[0].fields).map(field => field[0])
-      for(const field in accountTable.fields){
-        const key = field as keyof typeof accountTable.fields;
+      const canal_info = await db.query<any[]>('INFO FOR TABLE canal;')
+      const presentFields = Object.entries(canal_info[0].fields).map(field => field[0])
+      for(const field in canalTable.fields){
+        const key = field as keyof typeof canalTable.fields;
         if(presentFields.indexOf(key) < 0){
-          await db.query(accountTable.fields[key])
+          await db.query(canalTable.fields[key])
         }
       }
     }
 
-    if(tables.indexOf('chat') < 0){
-      const schema =  `${chatTable.table}\n` + Object.values(chatTable.fields).join('\n');
+    if(tables.indexOf('bridge') < 0){
+      const schema =  `${bridgeTable.table}\n` + Object.values(bridgeTable.fields).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
-      const chat_info = await db.query<any[]>('INFO FOR TABLE chat;')
-      const presentFields = Object.entries(chat_info[0].fields).map(field => field[0])
-      for(const field in chatTable.fields){
-        const key = field as keyof typeof chatTable.fields;
+      const bridge_info = await db.query<any[]>('INFO FOR TABLE bridge;')
+      const presentFields = Object.entries(bridge_info[0].fields).map(field => field[0])
+      for(const field in bridgeTable.fields){
+        const key = field as keyof typeof bridgeTable.fields;
         if(presentFields.indexOf(key) < 0){
-          await db.query(chatTable.fields[key])
+          await db.query(bridgeTable.fields[key])
         }
       }
     }
 
-    if(tables.indexOf('response') < 0){
-      const schema =  `${responseTable.table}\n` + Object.values(responseTable.fields).join('\n');
+    if(tables.indexOf('wave') < 0){
+      const schema =  `${waveTable.table}\n` + Object.values(waveTable.fields).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
-      const response_info = await db.query<any[]>('INFO FOR TABLE response;')
-      const presentFields = Object.entries(response_info[0].fields).map(field => field[0])
-      for(const field in responseTable.fields){
-        const key = field as keyof typeof responseTable.fields;
+      const wave_info = await db.query<any[]>('INFO FOR TABLE wave;')
+      const presentFields = Object.entries(wave_info[0].fields).map(field => field[0])
+      for(const field in waveTable.fields){
+        const key = field as keyof typeof waveTable.fields;
         if(presentFields.indexOf(key) < 0){
-          await db.query(responseTable.fields[key])
+          await db.query(waveTable.fields[key])
         }
       }
     }
 
     if(tables.indexOf('requests_to') < 0){
-      const schema =  `${requestsToTable.table}\n` + Object.values(requestsToTable.fields).join('\n');
+      const schema =  `${requestsToTable.table}\n` + Object.values(requestsToTable.fields).join('\n') + Object.values(requestsToTable.indices).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
       const requestsTo_info = await db.query<any[]>('INFO FOR TABLE requests_to;')
+
       const presentFields = Object.entries(requestsTo_info[0].fields).map(field => field[0])
       for(const field in requestsToTable.fields){
         const key = field as keyof typeof requestsToTable.fields;
@@ -97,19 +98,36 @@ export async function startUpDatabase(){
           await db.query(requestsToTable.fields[key])
         }
       }
+
+      const presentIndexes = Object.entries(requestsTo_info[0].indexes).map(field => field[0])
+      for(const index in requestsToTable.indices){
+        const key = index as keyof typeof requestsToTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(requestsToTable.indices[key])
+        }
+      }
     }
 
     if(tables.indexOf('connects_with') < 0){
-      const schema =  `${connectsWithTable.table}\n` + Object.values(connectsWithTable.fields).join('\n');
+      const schema =  `${connectsWithTable.table}\n` + Object.values(connectsWithTable.fields).join('\n') + Object.values(connectsWithTable.indices).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
       const connectsWith_info = await db.query<any[]>('INFO FOR TABLE connects_with;')
+
       const presentFields = Object.entries(connectsWith_info[0].fields).map(field => field[0])
       for(const field in connectsWithTable.fields){
         const key = field as keyof typeof connectsWithTable.fields;
         if(presentFields.indexOf(key) < 0){
           await db.query(connectsWithTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(connectsWith_info[0].indexes).map(field => field[0])
+      for(const index in connectsWithTable.indices){
+        const key = index as keyof typeof connectsWithTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(connectsWithTable.indices[key])
         }
       }
     }
