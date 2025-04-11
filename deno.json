@@ -5,6 +5,7 @@
   "imports": {
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.777.0",
     "@hono/hono": "jsr:@hono/hono@^4.7.5",
+    "@panva/jose": "jsr:@panva/jose@^6.0.10",
     "@std/assert": "jsr:@std/assert@1",
     "@surrealdb/surrealdb": "jsr:@surrealdb/surrealdb@^1.2.1"
   }

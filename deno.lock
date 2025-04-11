@@ -3,16 +3,21 @@
   "specifiers": {
     "jsr:@hono/hono@*": "4.7.5",
     "jsr:@hono/hono@^4.7.5": "4.7.5",
+    "jsr:@panva/jose@^6.0.10": "6.0.10",
     "jsr:@std/assert@1": "1.0.12",
     "jsr:@std/internal@^1.0.6": "1.0.6",
     "jsr:@surrealdb/surrealdb@^1.2.1": "1.2.1",
     "npm:@aws-sdk/client-s3@^3.777.0": "3.777.0",
+    "npm:@types/node@*": "22.12.0",
     "npm:isows@^1.0.6": "1.0.6_ws@8.18.1",
     "npm:uuidv7@^1.0.1": "1.0.2"
   },
   "jsr": {
     "@hono/hono@4.7.5": {
       "integrity": "36a7e1b3db8a58e5dc2bd36a76be53346f0966e04c24c635c4d6f58875575b0a"
+    },
+    "@panva/jose@6.0.10": {
+      "integrity": "bd6e916d7b0bdb34a76752c701aaa25828326885e199714ac81741b6caef7143"
     },
     "@std/assert@1.0.12": {
       "integrity": "08009f0926dda9cbd8bef3a35d3b6a4b964b0ab5c3e140a4e0351fbf34af5b9a",
@@ -987,6 +992,12 @@
         "tslib"
       ]
     },
+    "@types/node@22.12.0": {
+      "integrity": "sha512-Fll2FZ1riMjNmlmJOdAyY5pUbkftXslB5DgEzlIuNaiWhXd00FhWxVC/r4yV/4wBb9JfImTu+jiSvXTkJ7F/gA==",
+      "dependencies": [
+        "undici-types"
+      ]
+    },
     "bowser@2.11.0": {
       "integrity": "sha512-AlcaJBi/pqqJBIQ8U9Mcpc9i8Aqxn88Skv5d+xBX006BY5u8N3mGLHa5Lgppa7L/HfwgwLgZ6NYs+Ag6uUmJRA=="
     },
@@ -1008,6 +1019,9 @@
     "tslib@2.8.1": {
       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
     },
+    "undici-types@6.20.0": {
+      "integrity": "sha512-Ny6QZ2Nju20vw1SRHe3d9jVu6gJ+4e3+MMpqu7pqE5HT6WsTSlce++GQmK5UXS8mzV8DSYHrQH+Xrf2jVcuKNg=="
+    },
     "uuid@9.0.1": {
       "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA=="
     },
@@ -1021,6 +1035,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@hono/hono@^4.7.5",
+      "jsr:@panva/jose@^6.0.10",
       "jsr:@std/assert@1",
       "jsr:@surrealdb/surrealdb@^1.2.1",
       "npm:@aws-sdk/client-s3@^3.777.0"
