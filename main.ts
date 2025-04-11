@@ -24,7 +24,7 @@ console.log(calculateJetsamCost(bytes, 1))
 // await Deno.writeTextFile('./spoilerlistb.json', JSON.stringify(words, null, 2)) 
 app.use(logger())
 app.get('/', c => c.text('Welcome to the world of spies'))
-app.route('/', canal)
+app.route('/canal', canal)
 app.route('/payments', payments)
 
 const port = Number(Deno.env.get('PORT')) ?? 6001
