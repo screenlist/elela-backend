@@ -10,7 +10,7 @@ const payments = new Hono()
 payments.get('/price', c => {
   const quantity = c.req.query('quantity') ? Number(c.req.query('quantity')) : 3
   console.log(quantity, calculateUnitPrice(quantity))
-  return c.json({price: quantity * calculateUnitPrice(quantity)})
+  return c.json({price: Math.round(quantity * calculateUnitPrice(quantity)*100)/100 })
 })
 
 payments.get('/buy', async c => {
@@ -19,8 +19,8 @@ payments.get('/buy', async c => {
 
   const quantity = c.req.query('quantity') ? Number(c.req.query('quantity')) : 3
   const email = c.req.query('email')
-  if(!email){ throw new Error('Provide email address') }
-  const price = ((quantity * calculateUnitPrice(quantity)) * 100).toString()
+  if(!email){ throw new HTTPException(404, {message: 'Please provide email'}) }
+  const price = ( ( Math.round( quantity * calculateUnitPrice(quantity) * 100 ) / 100 ) * 100 ).toString()
   const reference = crypto.randomUUID()
   try {
     const response = await fetch(`${paystackUrl}/transaction/initialize`, {
@@ -37,8 +37,8 @@ payments.get('/buy', async c => {
         reference: reference
       })
     })
-
-    if(!response.ok){ throw new HTTPException(400,{ message: 'Could not initiate payment' }) }
+    
+    if(!response.ok){ throw new HTTPException(404,{ message: 'Could not initiate payment' }) }
 
     const initiated = await response.json()
 
@@ -51,9 +51,9 @@ payments.get('/buy', async c => {
     `
     await db.query(query)
 
-    return c.redirect(initiated.data['authorization_url'])
+    return c.json({ url: initiated.data['authorization_url'] })
   } catch (error) {
-    throw new HTTPException(400,{ message: 'Could not initiate payment', cause: error })
+    throw new HTTPException(404,{ message: 'Could not initiate payment', cause: error })
   }
 })
 
