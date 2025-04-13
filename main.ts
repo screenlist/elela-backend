@@ -7,8 +7,8 @@ import payments from "./payments/payments.routes.ts"
 
 const app = new Hono()
 startUpDatabase()
-const bytes = 1024*1024*1024*1024
-console.log(calculateJetsamCost(bytes, 1))
+// const bytes = 1024*1024*1024*1024
+// console.log(calculateJetsamCost(bytes, 1))
 // const wordstext = await Deno.readTextFile('wordlist.txt')
 // const wordsarray = wordstext.split('\n')
 // const words: { [key: string]: object } = {}
