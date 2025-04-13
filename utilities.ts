@@ -1,6 +1,10 @@
 import { JWTPayload, jwtVerify } from '@panva/jose'
 import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
+import { getSurreal } from "./database/config.ts";
+import { surql } from "@surrealdb/surrealdb";
+
+const db = await getSurreal()
 
 function hmacKey(): Promise<CryptoKey> {
   const secret = Deno.env.get('KEY')
@@ -69,9 +73,19 @@ export async function diceware(length: number): Promise<string[]> {
 }
 
 export async function emojiware(length: number){
-  const emojitext = await Deno.readTextFile('./wordlist.json')
-  const emojiObject = JSON.parse(emojitext)
-  const emojiArray = Object.entries(emojiObject).map(item => item[0])
+  const emojitext = await Deno.readTextFile('./emojilist.json')
+  const emojiObject: {[key: string]: {
+    name: string
+    slug: string
+    group: string
+    emoji_version: string
+    unicode_version: string
+    skin_tone_support: boolean
+  }} = JSON.parse(emojitext)
+  const emojiArray = Object.entries(emojiObject).filter(item => {
+    const version = +item[1].unicode_version
+    return version <= 10
+  }).map(item => item[0])
   let emojis = ''
   const randomValues = crypto.getRandomValues(new Uint8Array(length))
   for(let i = 0; i < length; i++){
@@ -140,7 +154,6 @@ export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: num
 }
 
 export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
-
   return async (c: Context, next: Next) => {
     const unixTimestamp = Math.floor(Date.now()/1000)
     try {
@@ -161,7 +174,7 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
 
       c.set('user', {
         id: payload.id,
-        table: payload.role === 'sailor' ? 'sailor' : payload.role === 'seafarer' ? 'seafarer' : undefined
+        table: payload.role === 'sailor' ? 'canal' : payload.role === 'seafarer' ? 'wave' : undefined
       })
       await next()
     } catch (error) {
@@ -170,3 +183,52 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
   }
 }
 
+export async function generateUniquePassphrase(maxAttempts: number): Promise<string> {
+  let attempts = 0
+
+  while(attempts < maxAttempts){
+    try {
+      const canal = (await diceware(6)).join(' ')
+      const canalHash = await encodeHMAC(canal)
+      const matchingHashes = (await db.query<[number]>(surql`RETURN count(SELECT * FROM canal WHERE passphrase = ${canalHash});`))[0]
+      if(matchingHashes === 0){
+        return canal
+      }
+      attempts++
+    } catch (error) {
+      throw new HTTPException(400, { message: 'Could not generate canal passphrase', cause: error })
+    }
+  }
+  
+  throw new HTTPException(400, { message: `Failed to generate canal passphrase after ${attempts} attempts` })
+}
+
+export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wave' , maxAttempts: number): Promise<string> {
+  let attempts = 0
+
+  while(attempts < maxAttempts){
+    try {
+      const firstOneEmojis = await emojiware(1)
+      const lastTwoEmojis = await emojiware(2)
+      const flare = `${firstOneEmojis} ${phrase} ${lastTwoEmojis}`
+      const bridgeQuery = surql`RETURN count(SELECT * FROM bridge WHERE public_code = ${flare});`
+      const waveQuery = surql`RETURN count(SELECT * FROM wave WHERE public_code = ${flare});`
+
+      if(table === 'bridge'){
+        const [bridges] = await db.query<[number]>(bridgeQuery)
+        if(bridges === 0){ return flare }
+      }
+
+      if(table === 'wave'){
+        const [waves] = await db.query<[number]>(waveQuery)
+        if(waves === 0){ return flare }
+      }
+
+      attempts++
+    } catch (error) {
+      throw new HTTPException(400, { message: 'Could not generate flare', cause: error })
+    }
+  }
+
+  throw new HTTPException(400, { message: `Could not generate flare after ${attempts} attemps` })
+}
