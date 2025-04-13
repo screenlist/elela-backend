@@ -73,6 +73,9 @@ export const canalTable = {
     last_login: 'DEFINE FIELD last_login ON TABLE canal TYPE datetime DEFAULT time::now();',
     created_at: 'DEFINE FIELD created_at ON TABLE canal TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE canal TYPE datetime DEFAULT time::now();'
+  },
+  indices: {
+    unique_passphrase: 'DEFINE INDEX unique_passphrase ON TABLE canal FIELDS passphrase UNIQUE;'
   }
 }
 
@@ -86,6 +89,9 @@ export const bridgeTable = {
     end_time: 'DEFINE FIELD end_time ON TABLE bridge TYPE datetime;',
     created_at: 'DEFINE FIELD created_at ON TABLE bridge TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE bridge TYPE datetime DEFAULT time::now();'
+  },
+  indices: {
+    unique_public_code: 'DEFINE INDEX unique_public_code ON TABLE bridge FIELDS public_code UNIQUE;'
   }
 }
 
@@ -98,14 +104,15 @@ export const waveTable = {
     secret_salt: 'DEFINE FIELD secret_salt ON TABLE wave TYPE string;',
     created_at: 'DEFINE FIELD created_at ON TABLE wave TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE wave TYPE datetime DEFAULT time::now();'
+  },
+  indices: {
+    unique_public_code: 'DEFINE INDEX unique_public_code ON TABLE wave FIELDS public_code UNIQUE;'
   }
 }
 
 export const requestsToTable = {
-  table: 'DEFINE TABLE requests_to SCHEMAFULL;',
+  table: 'DEFINE TABLE requests_to SCHEMAFULL TYPE RELATION IN wave OUT bridge;',
   fields: {
-    in: 'DEFINE FIELD in ON TABLE requests_to TYPE record<wave>;',
-    out: 'DEFINE FIELD out ON TABLE requests_to TYPE record<bridge>;',
     created_at: 'DEFINE FIELD created_at ON TABLE requests_to TYPE datetime DEFAULT time::now() READONLY;'
   },
   indices: {
@@ -114,10 +121,8 @@ export const requestsToTable = {
 }
 
 export const connectsWithTable = {
-  table: 'DEFINE TABLE connects_with SCHEMAFULL;',
+  table: 'DEFINE TABLE connects_with SCHEMAFULL TYPE RELATION IN wave OUT bridge;',
   fields: {
-    in: 'DEFINE FIELD in ON TABLE connects_with TYPE record<wave>;',
-    out: 'DEFINE FIELD out ON TABLE connects_with TYPE record<bridge>;',
     created_at: 'DEFINE FIELD created_at ON TABLE connects_with TYPE datetime DEFAULT time::now() READONLY;'
   },
   indices: {
@@ -126,10 +131,8 @@ export const connectsWithTable = {
 }
 
 export const conversesWithTable = {
-  table: 'DEFINE TABLE converses_with SCHEMAFULL;',
+  table: 'DEFINE TABLE converses_with SCHEMAFULL TYPE RELATION IN wave OUT canal;',
   fields: {
-    in: 'DEFINE FIELD in ON TABLE converses_with TYPE record<wave>;',
-    out: 'DEFINE FIELD out ON TABLE converses_with TYPE record<canal>;',
     bridge: 'DEFINE FIELD bridge ON TABLE converses_with TYPE record<bridge>;',
     from: 'DEFINE FIELD from ON TABLE converses_with TYPE record<wave|canal>;',
     reply_to: 'DEFINE FIELD reply_to ON TABLE converses_with TYPE option<record<converses_with>>;',

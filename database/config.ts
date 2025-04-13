@@ -40,11 +40,12 @@ export async function startUpDatabase(){
     const tables = Object.entries(database_info[0].tables).map(tab => tab[0])
 
     if(tables.indexOf('canal') < 0){
-      const schema =  `${canalTable.table}\n` + Object.values(canalTable.fields).join('\n');
+      const schema =  `${canalTable.table}\n` + Object.values(canalTable.fields).join('\n') + Object.values(canalTable.indices).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
       const canal_info = await db.query<any[]>('INFO FOR TABLE canal;')
+
       const presentFields = Object.entries(canal_info[0].fields).map(field => field[0])
       for(const field in canalTable.fields){
         const key = field as keyof typeof canalTable.fields;
@@ -52,14 +53,23 @@ export async function startUpDatabase(){
           await db.query(canalTable.fields[key])
         }
       }
+
+      const presentIndexes = Object.entries(canal_info[0].indexes).map(field => field[0])
+      for(const index in canalTable.indices){
+        const key = index as keyof typeof canalTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(canalTable.indices[key])
+        }
+      }
     }
 
     if(tables.indexOf('bridge') < 0){
-      const schema =  `${bridgeTable.table}\n` + Object.values(bridgeTable.fields).join('\n');
+      const schema =  `${bridgeTable.table}\n` + Object.values(bridgeTable.fields).join('\n') + Object.values(bridgeTable.indices).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
       const bridge_info = await db.query<any[]>('INFO FOR TABLE bridge;')
+
       const presentFields = Object.entries(bridge_info[0].fields).map(field => field[0])
       for(const field in bridgeTable.fields){
         const key = field as keyof typeof bridgeTable.fields;
@@ -67,19 +77,36 @@ export async function startUpDatabase(){
           await db.query(bridgeTable.fields[key])
         }
       }
+
+      const presentIndexes = Object.entries(bridge_info[0].indexes).map(field => field[0])
+      for(const index in bridgeTable.indices){
+        const key = index as keyof typeof bridgeTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(bridgeTable.indices[key])
+        }
+      }
     }
 
     if(tables.indexOf('wave') < 0){
-      const schema =  `${waveTable.table}\n` + Object.values(waveTable.fields).join('\n');
+      const schema =  `${waveTable.table}\n` + Object.values(waveTable.fields).join('\n') + Object.values(waveTable.indices).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
       const wave_info = await db.query<any[]>('INFO FOR TABLE wave;')
+
       const presentFields = Object.entries(wave_info[0].fields).map(field => field[0])
       for(const field in waveTable.fields){
         const key = field as keyof typeof waveTable.fields;
         if(presentFields.indexOf(key) < 0){
           await db.query(waveTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(wave_info[0].indexes).map(field => field[0])
+      for(const index in waveTable.indices){
+        const key = index as keyof typeof waveTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(waveTable.indices[key])
         }
       }
     }
