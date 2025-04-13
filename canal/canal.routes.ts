@@ -1,11 +1,12 @@
 import { Hono } from '@hono/hono'
+import { upgradeWebSocket } from '@hono/hono/deno'
 import { HTTPException } from '@hono/hono/http-exception'
 import { RecordId, surql } from "@surrealdb/surrealdb"
 import { SignJWT } from '@panva/jose'
 import { promisify } from "node:util"
 import { timingSafeEqual } from "node:crypto"
 import { getSurreal } from "../database/config.ts"
-import { diceware, emojiware, encodeHMAC, verifyHMAC, verifyRequest, hexToBytes } from "../utilities.ts"
+import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare } from "../utilities.ts"
 import { PaymentFiat } from "../payments/payments.config.ts";
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith  } from "./canal.config.ts";
 
@@ -14,16 +15,21 @@ const canal = new Hono<{ Variables: {user: {id: string, table: string}} }>()
 
 canal.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
-  const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)}`))[0]
-  return c.json({
-    usage: {
-      capacity: canal.capacity,
-      usage: canal.usage,
-      is_premium: canal.is_premium,
-    },
-    bridges
-  })
+  try {
+    const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
+    if(!canal){ throw new HTTPException(404, { message: 'Canal not found' }) }
+    const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)}`))[0]
+    return c.json({
+      usage: {
+        capacity: canal.capacity,
+        usage: canal.usage,
+        is_premium: canal.is_premium,
+      },
+      bridges
+    })
+  } catch (error) {
+    throw new HTTPException(404, { message: 'Canal not found', cause: error })
+  }
 })
 
 canal.get('/generate', async (c) => {
@@ -32,7 +38,7 @@ canal.get('/generate', async (c) => {
 
   const ref = c.req.query('ref')
   try {
-    const canal = (await diceware(6)).join(' ')
+    const canal = await generateUniquePassphrase(120)
     const canalHash = await encodeHMAC(canal)
 
     if(ref){
@@ -41,22 +47,20 @@ canal.get('/generate', async (c) => {
       if(transaction.data.status !== 'success'){ throw new HTTPException(404,{ message: 'Payment not valid, could not generate canal.' })  }
       const payment = (await db.query<[PaymentFiat[]]>(surql`SELECT * FROM payment_fiat WHERE reference_code = ${ref};`))[0][0]
       if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
-      await db.query(surql`UPDATE ${payment.id} SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
+      await db.query(surql`UPDATE type::record(${payment.id}, 'payment_fiat') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
 
       const content = {
-        standard_usage: 0,
-        standard_capacity: 0,
-        premium_usage: 0,
-        premium_capacity: payment.points,
+        usage: 0,
+        capacity: payment.points,
+        is_premium: true,
         passphrase: canalHash
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
     } else {
       const content = {
-        standard_usage: 0,
-        standard_capacity: 1,
-        premium_usage: 0,
-        premium_capacity: 0,
+        usage: 0,
+        capacity: 1,
+        is_premium: false,
         passphrase: canalHash
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
@@ -105,17 +109,18 @@ canal.post('/bridge', verifyRequest(['sailor']), async c => {
     if(canal.capacity - canal.usage === 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
     const start = new Date(start_time).valueOf()
     const end = start + 1000*60*20
-    const code = emojiware(2)+' '+flare+' '+emojiware(4)
+    const code = await generateUniqueFlare(flare, 'bridge', 120)
     const bridgeContent = {
       canal: canal.id,
       public_code: code,
       start_time: new Date(start),
       end_time: new Date(end)
     }
-    const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE ${canal.id} SET usage = ${canal.usage++};`)
+    const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
     return c.json(newBridge[0])
   } catch (error) {
-    throw new HTTPException(400, { message: 'Chat could not be created', cause: error })
+    console.log(error)
+    throw new HTTPException(400, { message: 'Bridge could not be created', cause: error })
   }
 })
 
@@ -124,14 +129,15 @@ canal.get('/bridge/:id', verifyRequest(['sailor']), async c => {
   const id = c.req.param('id')
   try {
     const bridge = await db.select<Bridge>(new RecordId('bridge', id))
-    if(bridge.canal !== new RecordId(user.table, user.id)){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
-    const waves = (await db.query<[{count: number}[]]>(surql`SELECT count() FROM requests_to WHERE out = ${bridge.id} GROUP BY count;`))[0][0]
+    if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
+    const waves = (await db.query<[number]>(surql`RETURN count(SELECT * FROM requests_to WHERE out = ${bridge.id});`))[0]
     return c.json({
       bridge: bridge,
-      waves: waves.count
+      waves: waves
     })
   } catch (error) {
-    throw new HTTPException(404, { message: 'Chat not found', cause: error })
+    console.log(error)
+    throw new HTTPException(404, { message: 'Bridge not found', cause: error })
   }
 })
 
@@ -142,14 +148,14 @@ canal.post('/bridge/:id/connect', verifyRequest(['sailor']), async c => {
     const { counterflare } = await c.req.json()
     const bridge = await db.select<Bridge>(new RecordId('bridge', id))
     const canal = await db.select<Canal>(new RecordId('canal', id))
-    if(bridge.canal !== new RecordId(user.table, user.id)){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
+    if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
     const wave = (await db.query<[Wave[]]>(surql`SELECT * FROM wave WHERE public_code = ${counterflare} LIMIT 1;`))[0][0]
     if(!wave){ throw new HTTPException(400, { message: 'The Wave does not exist' }) }
-    const connects = (await db.query<[{count: number}[]]>(surql`SELECT count() FROM connects_with WHERE out = ${bridge.id} GROUP BY count;`))[0][0]
-    if(connects.count > 0 && canal.is_premium === false){ throw new HTTPException(400, { message: 'You Canal does not allow the capacity for a Bridge to connect with more than 1 Wave.' }) }
+    const connects = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE out = ${bridge.id});`))[0]
+    if(connects > 0 && canal.is_premium === false){ throw new HTTPException(400, { message: 'You Canal does not allow the capacity for a Bridge to connect with more than 1 Wave.' }) }
     await db.query(surql`RELATE ${wave.id}->connects_with->${bridge.id};`)
-    if(connects.count > 1 && canal.capacity - canal.usage > 0){
-      await db.query(surql`UPDATE ${canal.id} SET usage = ${canal.usage++};`)
+    if(connects > 1 && canal.capacity - canal.usage > 0){
+      await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
     }
     return c.json({connection: 'successful'})
   } catch (error) {
@@ -162,8 +168,8 @@ canal.get('/bridge/:id/connections', verifyRequest(['sailor']), async c => {
   const id = c.req.param('id')
   try {
     const bridge = await db.select<Bridge>(new RecordId('bridge', id))
-    if(bridge.canal !== new RecordId(user.table, user.id)){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
-    const connections = (await db.query<[ConnectsWith[]]>(surql`SELECT * FROM connects_with WHERE out = ${id};`))[0]
+    if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
+    const connections = (await db.query<[ConnectsWith[]]>(surql`SELECT * FROM connects_with WHERE out = ${bridge.id};`))[0]
     return c.json(connections)
   } catch (error) {
     throw new HTTPException(404, { message: 'The connections could not be retrived', cause: error })
@@ -185,7 +191,7 @@ canal.post('/wave', async c => {
     const salt = crypto.randomUUID()
     const derivedKey = await scryptAsync(anchor, salt, 64)
     const secretCode = Array.from(derivedKey).map((byte) => byte.toString(16).padStart(2, "0")).join("")
-    const publicCode = emojiware(2)+counterflare+emojiware(4)
+    const publicCode = await generateUniqueFlare(counterflare, 'wave', 120)
     const waveContent = {
       secret_salt: salt,
       secret_code: secretCode,
@@ -199,6 +205,7 @@ canal.post('/wave', async c => {
       start_time: bridge.start_time
     })
   } catch (error) {
+    console.log(error)
     throw new HTTPException(400, { message: 'Wave not recorded', cause: error })
   }
 })
@@ -214,7 +221,7 @@ canal.post('/wave/auth', async c => {
     const bridge = one[0]
     const wave = two[0]
 
-    const connection = (await db.query<[{count: number}[]]>(surql`SELECT count() FROM connects_with WHERE in = ${wave.id}, out = ${bridge.id} LIMIT 1;`))[0][0]
+    const connection = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id});`))[0]
 
     if(!bridge){ throw new HTTPException(400, { message: 'This bridge has collapsed' }) }
     if(!wave){  throw new HTTPException(400,  { message: 'This wave has stopped' }) }
@@ -231,7 +238,7 @@ canal.post('/wave/auth', async c => {
 
     if(match === false){ throw new HTTPException(400, { message: 'This wave does not recognise the anchor' }) }
 
-    if(connection.count === 1){
+    if(connection === 1){
       const waveId = wave.id.id
       const jwtSecret = Deno.env.get('JWT_SECRET')
       const jwtExpiration = new Date(bridge.end_time)
@@ -242,7 +249,7 @@ canal.post('/wave/auth', async c => {
       return c.json({
         approved: true,
         access_token: token,
-        connection_path: `/connection/${wave.id.id}:${bridge.id.id}`,
+        connection_path: `/canal/connection/${wave.id.id}:${bridge.id.id}`,
         start_time: bridge.start_time
       })
     } else {
@@ -254,8 +261,57 @@ canal.post('/wave/auth', async c => {
       })
     }
   } catch (error) {
+    console.log(error)
     throw new HTTPException(400, { message: 'Wave not recorded', cause: error })
   }
 })
+
+canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async (c, next) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  try {
+    const waveId = id.split(':')[0]
+    const bridgeId = id.split(':')[1]
+    if(user.table === 'wave' && waveId !== user.id){ throw new HTTPException(403, { message: 'Action not allowed' }) }
+    const wave = await db.select<Wave>(new RecordId('wave', waveId))
+    const bridge = await db.select<Bridge>(new RecordId('bridge', bridgeId))
+    if(!wave || !bridge){ throw new HTTPException(403, { message: 'The connection is not allowed' }) }
+    if(user.table === 'canal' && bridge.canal.id !== user.id) { throw new HTTPException(403, { message: 'Action not allowed' }) }
+    const connection = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id});`))[0]
+    if(connection !== 1){ throw new HTTPException(403, { message: 'The connection is not allowed' }) }
+    if(bridge.start_time > new Date()){ throw new HTTPException(403, { message: 'The connection is not active yet' }) }
+    if(bridge.end_time < new Date()){ throw new HTTPException(403, { message: 'The connection is not longer active' }) }
+    await next()
+  } catch (error) {
+    throw new HTTPException(403, { message: 'The connection could not be established', cause: error })
+  }
+}, upgradeWebSocket(c => {
+  console.log(c.req.path)
+  return {
+    onMessage: (event, ws) => {
+      console.log(event)
+      console.log(ws)
+      const value = event.data as string
+      ws.send(value)
+    },
+    onOpen: (event, ws) => {
+      console.log(event)
+      console.log(ws)
+      ws.send('Successfully connected')
+    },
+    onClose: (event, ws) => {
+      console.log(event)
+      console.log(ws)
+      ws.send('One client closed')
+    },
+    onError: (event, ws) => {
+      console.log(event)
+      console.log(ws)
+      ws.close(1002, `I'm out, peace.`)
+    }
+  }
+}, {
+  protocol: 'chat'
+}))
 
 export default canal
