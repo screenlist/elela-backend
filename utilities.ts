@@ -3,6 +3,8 @@ import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
 import { getSurreal } from "./database/config.ts";
 import { surql } from "@surrealdb/surrealdb";
+import { ethers } from 'ethers'
+import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
 
 const db = await getSurreal()
 
@@ -96,7 +98,7 @@ export async function diceware(length: number): Promise<string[]> {
   }
 
   const phrase: string[] = set.map(value => {
-    return words[value]['original_word']
+    return words[value]
   })
   return phrase
 }
@@ -159,9 +161,9 @@ export function readableMoney(price: number) {
 }
 
 export function calculateUnitPrice(quantity: number){
-  const base = 3
-  const minimum = 1.8
-  const decay = 0.2
+  const base = 0.15
+  const minimum = 0.09
+  const decay = 0.02
   const difference = base - minimum
   const discount = difference * Math.exp(-decay * quantity)
   return minimum + discount
@@ -292,3 +294,108 @@ export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wav
 
   throw new HTTPException(400, { message: `Could not generate flare after ${attempts} attemps` })
 }
+
+export async function convertToTender(amount: number, tender: 'avax' | 'zar') {
+  const coinAPIUrl = Deno.env.get('COINAPI_URL')
+  const coinAPIKey = Deno.env.get('COINAPI_KEY')
+
+  if(!coinAPIKey || !coinAPIUrl){ throw new HTTPException(404, { message: 'Exchange rate cannot be queried' }) }
+
+  if(tender === 'zar'){
+    try {
+      const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'ZAR' LIMIT 1;`))[0][0]
+      if(!rate){
+
+        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+        const latestRate: CoinAPIResponse = await fetchRate.json()
+        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+        const newRateContent = {
+          base: 'USD',
+          quote: 'ZAR',
+          amount: latestRate.rate
+        }
+        await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
+        return latestRate.rate*amount
+
+      } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
+
+        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+        const latestRate: CoinAPIResponse = await fetchRate.json()
+        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+        await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
+        return latestRate.rate*amount
+
+      } else {
+        return rate.amount*amount
+      }
+    } catch (error) {
+      throw new HTTPException(404, { message: `Could not convert to South African Rands`, cause: error})
+    }
+  } else if(tender === 'avax'){
+    try {
+      const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'AVAX' LIMIT 1;`))[0][0]
+      if(!rate){
+
+        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+        const latestRate: CoinAPIResponse = await fetchRate.json()
+        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+        const newRateContent = {
+          base: 'USD',
+          quote: 'AVAX',
+          amount: latestRate.rate
+        }
+        await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
+        return latestRate.rate*amount
+
+      } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
+
+        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+        const latestRate: CoinAPIResponse = await fetchRate.json()
+        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+        await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
+        return latestRate.rate*amount
+
+      } else {
+        return rate.amount*amount
+      }
+    } catch (error) {
+      throw new HTTPException(404, { message: `Could not convert to Avalanche`, cause: error})
+    }
+  } else { 
+    throw new HTTPException(404, { message: 'Not enough parameters provided' })
+  }
+  
+}
+
+export async function findAVAXPayment(sender: string, reference: string) {
+  const contractAddress = Deno.env.get('CONTRACT_ADDRESS')
+  const rpcURL = Deno.env.get('AVAX_RPC')
+
+  if(!contractAddress || !rpcURL){ throw new HTTPException(400, { message: 'Contract address or provider not provided' }) }
+
+  const contractABI = ['event PaymentReceived ( address indexed sender, uint256 amount, string invoice )']
+  const provider = new ethers.JsonRpcProvider(rpcURL)
+  const contract = new ethers.Contract(contractAddress, contractABI, provider)
+  const filter = contract.filters.PaymentReceived(sender)
+  try {
+    const events = await contract.queryFilter(filter, -1000)
+    for (const event of events) {
+      const key = event as ethers.EventLog
+      const { args } = key;
+      if (args && args.invoice === reference) {
+        return {
+          sender: args.sender,
+          amount: ethers.formatEther(args.amount),
+          reference: args.invoice,
+          transactionHash: key.transactionHash
+        };
+      }
+    }
+
+    return null
+  } catch (error) {
+    throw new HTTPException(400, {message: 'Payment could not be verified', cause: error})
+  }
+}
+
+console.log(ethers.parseEther('0.0717'))

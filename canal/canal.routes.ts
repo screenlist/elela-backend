@@ -6,8 +6,8 @@ import { SignJWT } from '@panva/jose'
 import { promisify } from "node:util"
 import { timingSafeEqual } from "node:crypto"
 import { getSurreal } from "../database/config.ts"
-import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare } from "../utilities.ts"
-import { PaymentFiat } from "../payments/payments.config.ts";
+import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, findAVAXPayment } from "../utilities.ts"
+import { Payment } from "../payments/payments.config.ts";
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith  } from "./canal.config.ts";
 
 const db = await getSurreal()
@@ -37,18 +37,21 @@ canal.get('/generate', async (c) => {
   const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY')
 
   const ref = c.req.query('ref')
+  const sender = c.req.query('sender')
   try {
     const canal = await generateUniquePassphrase(120)
     const canalHash = await encodeHMAC(canal)
 
-    if(ref){
+    console.log(ref, sender)
+
+    if(ref && !sender){
+      
       const res = await fetch(`${paystackUrl}/transaction/verify/${ref}`, {method: 'GET', headers: {'Authorization': `Bearer ${paystackSecret}`}})
       const transaction = await res.json()
       if(transaction.data.status !== 'success'){ throw new HTTPException(404,{ message: 'Payment not valid, could not generate canal.' })  }
-      const payment = (await db.query<[PaymentFiat[]]>(surql`SELECT * FROM payment_fiat WHERE reference_code = ${ref};`))[0][0]
+      const payment = (await db.query<[Payment[]]>(surql`SELECT * FROM payment WHERE reference_code = ${ref};`))[0][0]
       if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
-      await db.query(surql`UPDATE type::record(${payment.id}, 'payment_fiat') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
-
+      await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
       const content = {
         usage: 0,
         capacity: payment.points,
@@ -56,7 +59,28 @@ canal.get('/generate', async (c) => {
         passphrase: canalHash
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
+      return c.json(canal)
+
+    } if(ref && sender){
+      
+      const paymentAVAX = await findAVAXPayment(sender, ref)
+      if(!paymentAVAX) { throw new HTTPException(404, { message: 'Payment not found' }) }
+      const payment = (await db.query<[Payment[]]>(surql`SELECT * FROM payment WHERE reference_code = ${ref};`))[0][0]
+      if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
+      if(payment.amount !== +paymentAVAX.amount){ new HTTPException(404, { message: 'The amount paid does not match the amount quoted' }) }
+      await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${paymentAVAX.transactionHash};`)
+      const content = {
+        usage: 0,
+        capacity: payment.points,
+        is_premium: true,
+        passphrase: canalHash
+      }
+      await db.query(surql`CREATE canal CONTENT ${content};`)
+      console.log(payment.amount !== +paymentAVAX.amount)
+      return c.json(canal)
+
     } else {
+
       const content = {
         usage: 0,
         capacity: 1,
@@ -64,10 +88,11 @@ canal.get('/generate', async (c) => {
         passphrase: canalHash
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
-    }
+      return c.json(canal)
 
-    return c.json(canal)
+    }
   } catch (error) {
+    console.log(error)
     throw new HTTPException(404,{ message: 'Could not generate canal.', cause: error })
   }
 })
@@ -119,7 +144,6 @@ canal.post('/bridge', verifyRequest(['sailor']), async c => {
     const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
     return c.json(newBridge[0])
   } catch (error) {
-    console.log(error)
     throw new HTTPException(400, { message: 'Bridge could not be created', cause: error })
   }
 })

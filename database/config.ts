@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
 import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable } from '../canal/canal.config.ts'
-import { paymentFiatTable } from "../payments/payments.config.ts"
+import { paymentTable, rateTable } from "../payments/payments.config.ts"
 
 export async function getSurreal(): Promise<Surreal> {
   const url = Deno.env.get('DB_URL')
@@ -174,21 +174,55 @@ export async function startUpDatabase(){
       }
     }
 
-    if(tables.indexOf('payment_fiat') < 0){
-      const schema =  `${paymentFiatTable.table}\n` + Object.values(paymentFiatTable.fields).join('\n');
+    if(tables.indexOf('payment') < 0){
+      const schema =  `${paymentTable.table}\n` + Object.values(paymentTable.fields).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
-      const paymentFiat_info = await db.query<any[]>('INFO FOR TABLE payment_fiat;')
-      const presentFields = Object.entries(paymentFiat_info[0].fields).map(field => field[0])
-      for(const field in paymentFiatTable.fields){
-        const key = field as keyof typeof paymentFiatTable.fields;
+      const payment_info = await db.query<any[]>('INFO FOR TABLE payment;')
+
+      const presentFields = Object.entries(payment_info[0].fields).map(field => field[0])
+      for(const field in paymentTable.fields){
+        const key = field as keyof typeof paymentTable.fields;
         if(presentFields.indexOf(key) < 0){
-          await db.query(paymentFiatTable.fields[key])
+          await db.query(paymentTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(payment_info[0].indexes).map(field => field[0])
+      for(const index in paymentTable.indices){
+        const key = index as keyof typeof paymentTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(paymentTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('rate') < 0){
+      const schema =  `${rateTable.table}\n` + Object.values(rateTable.fields).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const rate_info = await db.query<any[]>('INFO FOR TABLE rate;')
+
+      const presentFields = Object.entries(rate_info[0].fields).map(field => field[0])
+      for(const field in rateTable.fields){
+        const key = field as keyof typeof rateTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(rateTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(rate_info[0].indexes).map(field => field[0])
+      for(const index in rateTable.indices){
+        const key = index as keyof typeof rateTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(rateTable.indices[key])
         }
       }
     }
   } catch (error) {
+    console.log(error)
     throw new Error('Database preparation failed', { cause: error })
   }
 }
