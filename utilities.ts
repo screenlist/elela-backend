@@ -6,6 +6,35 @@ import { surql } from "@surrealdb/surrealdb";
 
 const db = await getSurreal()
 
+async function _sortHexColorsFromBlackToWhite(path: string){
+  const colorstext = await Deno.readTextFile(path)
+  const colorsarray: Array<string[]> = Object.entries(JSON.parse(colorstext))
+  function sortHexColorsByBrightness(hexColors: Array<string[]>): Array<string[]> {
+    return hexColors.slice().sort((a, b) => {
+      const brightness = (hex: string): number => {
+        const r = parseInt(hex.slice(1, 3), 16)
+        const g = parseInt(hex.slice(3, 5), 16)
+        const b = parseInt(hex.slice(5, 7), 16)
+        return r + g + b
+      }
+      return brightness(a[0]) - brightness(b[0])
+    })
+  }
+  const colors: {[key: string]: string } = {}
+  console.log(colorsarray)
+  sortHexColorsByBrightness(colorsarray).forEach(val => { colors[val[1]] = val[0] })
+  return colors
+}
+
+function hashWord(word: string) {
+  let hash = 0
+  for (let i = 0; i < word.length; i++) {
+    hash = (hash << 5) - hash + word.charCodeAt(i)
+    hash |= 0 // Convert to 32-bit integer
+  }
+  return Math.abs(hash)
+}
+
 function hmacKey(): Promise<CryptoKey> {
   const secret = Deno.env.get('KEY')
   const encoder = new TextEncoder()
@@ -92,6 +121,37 @@ export async function emojiware(length: number){
     emojis += emojiArray[randomValues[i]% emojiArray.length] 
   }
   return emojis
+}
+
+export async function generateWordColorMap(){
+  const wordstext = await Deno.readTextFile('./wordlist.json')
+  const wordsObject: {[key: string]: string} = JSON.parse(wordstext)
+  const colorstext = await Deno.readTextFile('./colorlist.json')
+  const colorsObject: {[key: string]: string} = JSON.parse(colorstext)
+  const words = Object.values(wordsObject)
+  const colors = Object.values(colorsObject)
+  
+  const wordToColor: { [key: string]: string } = {}
+
+  words.forEach(word => {
+    const hash = hashWord(word)
+    const color = colors[hash % colors.length]
+    wordToColor[word] = color
+  })
+
+  return wordToColor
+}
+
+export async function reverseColorToWords(){
+  const wordToColor = await generateWordColorMap()
+  const colorToWords: {[key: string]: string[]} = {}
+  for(const [word, color] of Object.entries(wordToColor)){
+    if(!colorToWords[color]){
+      colorToWords[color] = []
+    }
+    colorToWords[color].push(word)
+  }
+  return colorToWords
 }
 
 export function readableMoney(price: number) {
