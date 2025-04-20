@@ -1,13 +1,15 @@
 {
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env --allow-read main.ts"
+    "dev": "deno run --watch --allow-net --allow-env --allow-read main.ts",
+    "prod": "deno run --allow-net --allow-env --allow-read main.ts"
   },
   "imports": {
-    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.777.0",
     "@hono/hono": "jsr:@hono/hono@^4.7.5",
     "@panva/jose": "jsr:@panva/jose@^6.0.10",
     "@std/assert": "jsr:@std/assert@1",
     "@surrealdb/surrealdb": "jsr:@surrealdb/surrealdb@^1.2.1",
-    "ethers": "npm:ethers@^6.13.5"
+    "ethers": "npm:ethers@^6.13.5",
+    "node-cron": "npm:node-cron@^3.0.3",
+    "zod": "npm:zod@^3.24.3"
   }
 }
