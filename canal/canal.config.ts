@@ -58,6 +58,7 @@ export type ConversesWith =  {
   body: string
   reply_to: RecordId<string> // ConverseWith
   has_attachment: boolean
+  attachment?: RecordId<string>
   created_at: string
 }
 
@@ -138,6 +139,7 @@ export const conversesWithTable = {
     reply_to: 'DEFINE FIELD reply_to ON TABLE converses_with TYPE option<record<converses_with>>;',
     body: 'DEFINE FIELD body ON TABLE converses_with TYPE string ASSERT string::len($value) < 1000;',
     has_attachment: 'DEFINE FIELD has_attachment ON TABLE converses_with TYPE bool;',
+    attachment: 'DEFINE FIELD attachment ON TABLE converses_with TYPE option<record<cargo>>;',
     created_at: 'DEFINE FIELD created_at ON TABLE converses_with TYPE datetime DEFAULT time::now() READONLY;'
   }
 }
