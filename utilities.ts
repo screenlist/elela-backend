@@ -177,7 +177,7 @@ export function calculateUsagePoints(size: number, downloads: number){
   return Math.ceil(totalEgreePerByte/egressPerByte)
 }
 
-export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: number) {
+export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: number, retention = 1) {
   const bytesPerGB = 1024 ** 3;
   const storageCostPerGB = 0.006; // USD
   const flowPointValueUSD = 0.03;
@@ -203,15 +203,15 @@ export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: num
   const billableEgressBytes = fileSizeBytes * extraDownloads;
   const extraFlowPoints = Math.ceil(billableEgressBytes / egressPerFlowPointBytes);
 
-  const totalFlowPoints = storageFlowPoints + extraFlowPoints;
+  const totalFlowPoints = ( Math.round(retention)*storageFlowPoints ) + extraFlowPoints;
 
   return {
-    storageFlowPoints,
-    includedDownloads,
-    maxDownloadsBeforeExtraPoints,
-    extraDownloads,
-    extraFlowPoints,
-    totalFlowPoints,
+    strorage_points: storageFlowPoints*Math.round(retention),
+    downloads_per_point: includedDownloads,
+    extra_downloads: extraDownloads,
+    extra_download_points: extraFlowPoints,
+    retention_months: retention,
+    total_points: totalFlowPoints
   };
 }
 
