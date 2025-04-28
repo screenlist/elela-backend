@@ -1,11 +1,9 @@
 import { Hono } from '@hono/hono'
 import { logger } from '@hono/hono/logger'
-import { HTTPResponseError } from '@hono/hono/types'
 import { startUpDatabase } from "./database/config.ts"
 import canal from "./canal/canal.routes.ts"
 import payments from "./payments/payments.routes.ts"
 import jetsam from "./jetsam/jetsam.routes.ts"
-import { HttpConnectionError } from "@surrealdb/surrealdb";
 import { HTTPException } from "@hono/hono/http-exception";
 
 const app = new Hono()
