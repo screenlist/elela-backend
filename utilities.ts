@@ -187,7 +187,7 @@ export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: num
   const fileSizeGB = fileSizeBytes / bytesPerGB;
   const storageCostUSD = fileSizeGB * storageCostPerGB;
   const storageFlowPoints = Math.ceil(storageCostUSD / flowPointValueUSD);
-
+  
   const remainingBudgetUSD = flowPointValueUSD - storageCostUSD;
   const remainingEgressBytes = remainingBudgetUSD > 0
     ? (remainingBudgetUSD / egressCostPerGB) * bytesPerGB
@@ -214,6 +214,55 @@ export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: num
     total_points: totalFlowPoints
   };
 }
+
+function calculateJetsam(
+  fileSizeBytes: number,
+  desiredDownloads: number,
+  desiredRetentionMonths: number = 1
+) {
+  const bytesPerGB = 1024 ** 3;
+  const storageCostPerGBPerMonth = 0.006; // USD
+  const downloadCostPerGB = 0.01;         // USD
+  const flowPointValueUSD = 0.03;          // USD per Flowpoint
+
+  const fileSizeGB = fileSizeBytes / bytesPerGB;
+
+  // Storage Costs
+  const storageCostUSD = fileSizeGB * storageCostPerGBPerMonth * desiredRetentionMonths;
+
+  // Download Costs
+  const downloadCostUSD = desiredDownloads <= 3 ? 0 : fileSizeGB * downloadCostPerGB * (desiredDownloads - 3);
+
+  // Total Costs
+  const totalCostUSD = storageCostUSD + downloadCostUSD;
+
+  const totalFlowPoints = Math.ceil(totalCostUSD / flowPointValueUSD);
+
+  // Split back how many flowpoints are due to storage and downloads separately
+  const storageFlowPoints = Math.ceil(storageCostUSD / flowPointValueUSD);
+  const downloadFlowPoints = Math.ceil(downloadCostUSD / flowPointValueUSD);
+
+  const remainingFlowPointValueUSD = (totalFlowPoints * flowPointValueUSD) - totalCostUSD
+  const maxRemainingDownloads = remainingFlowPointValueUSD > 0 ? Math.floor(remainingFlowPointValueUSD / (fileSizeGB * downloadCostPerGB)) : 0
+  const maxRemainingRetention = remainingFlowPointValueUSD > 0 ? Math.floor(remainingFlowPointValueUSD / (fileSizeGB * storageCostPerGBPerMonth)) : 0
+
+  return {
+    storage_points: storageFlowPoints,
+    downloads: desiredDownloads,
+    retention: desiredRetentionMonths,
+    download_points: downloadFlowPoints,
+    remaining_value: {
+      usage: Math.round( (totalCostUSD / (totalFlowPoints * flowPointValueUSD)) * 100 ),
+      max_downloads: maxRemainingDownloads,
+      max_retention: maxRemainingRetention
+    },
+    total_points: totalFlowPoints,
+  };
+}
+
+
+console.log(calculateJetsam(5*1024*1024, 547, 116))
+console.log(calculateJetsamCost(5*1024*1024, 120, 24))
 
 export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
   return async (c: Context, next: Next) => {
