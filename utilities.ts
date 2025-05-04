@@ -2,9 +2,11 @@ import { JWTPayload, jwtVerify } from '@panva/jose'
 import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
 import { getSurreal } from "./database/config.ts";
-import { surql } from "@surrealdb/surrealdb";
+import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
+import { encodeHex, decodeHex } from '@std/encoding'
 import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
+import { Session } from "./canal/canal.config.ts";
 
 const db = await getSurreal()
 
@@ -275,7 +277,7 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
       const jwtSecret = Deno.env.get('JWT_SECRET')
       const encodedSecret =  encoder.encode(jwtSecret)
       const decodedJwt = await jwtVerify(jwt, encodedSecret)
-      const payload: JWTPayload & {role?: 'sailor' | 'seafarer'} =  decodedJwt['payload']
+      const payload: JWTPayload & {role?: 'sailor' | 'seafarer', sid?: string} =  decodedJwt['payload']
       if(!payload.exp || !payload.iat || !payload.role){
         throw new HTTPException(401, { message: 'Access denied' })
       }
@@ -283,9 +285,18 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
         throw new HTTPException(401, { message: 'Access denied' })
       }
 
+      if(payload.role === 'sailor'){
+        if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
+        const session = await db.select<Session>(new RecordId('session', payload.sid))
+        if(Date.now() > new Date(session.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
+        const newExpiry = new Date( Date.now() + 1000*60*20 )
+        await db.query(surql`UPDATE type::record(${session.id.toString()}) SET expires_at = ${newExpiry}`)
+      }
+
       c.set('user', {
         id: payload.id,
-        table: payload.role === 'sailor' ? 'canal' : payload.role === 'seafarer' ? 'wave' : undefined
+        table: payload.role === 'sailor' ? 'canal' : payload.role === 'seafarer' ? 'wave' : undefined,
+        session: payload.sid
       })
       await next()
     } catch (error) {
@@ -448,3 +459,66 @@ export async function findAVAXPayment(sender: string, reference: string) {
 }
 
 console.log(ethers.parseEther('0.0717'))
+
+export class Obfuscator {
+
+  generateKey(length = 32){
+    const randomBytes = crypto.getRandomValues(new Uint8Array(length))
+    return encodeHex(randomBytes)
+  }
+
+  async deriveKey(salt: string, iterations = 10000){
+    const masterKey = Deno.env.get('OTP_KEY')
+    const encoder = new TextEncoder()
+
+    const material = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(masterKey),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits', 'deriveKey']
+    )
+
+    return await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode(salt),
+        iterations: iterations,
+        hash: 'SHA-256'
+      },
+      material,
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    )
+  }
+
+  async encrypt(data: string, key: CryptoKey){
+    const encoder = new TextEncoder()
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+
+    const content =  await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encoder.encode(data)
+    )
+
+    const combined = new Uint8Array( [...iv, ...new Uint8Array(content)] )
+
+    return encodeHex(combined)
+  }
+
+  async decrypt(data: string, key: CryptoKey){
+    const decoder = new TextDecoder()
+    const content = decodeHex(data) as Uint8Array<ArrayBuffer>
+    const iv = content.subarray(0, 12)
+    const slice = content.subarray(12)
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      slice
+    )
+
+    return decoder.decode(decrypted)
+  }
+}
