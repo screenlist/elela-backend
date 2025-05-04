@@ -9,9 +9,30 @@ export type Canal = {
   capacity: number
   is_premium: boolean
   passphrase: string
-  last_login: Date
+  auth_secret?: string
+  auth_salt?: string
+  topt_enabled: boolean
   created_at: Date
   updated_at: Date
+}
+
+export type Session = {
+  id: RecordId<string>
+  canal: RecordId<string>
+  browser: string
+  device: string
+  os: string
+  created_at: Date
+  expires_at: Date
+}
+
+export type Auth = {
+  id: RecordId<string>
+  canal: RecordId<string>
+  token: string
+  attempts: number
+  created_at: Date
+  expires_at: Date
 }
 
 export type Bridge = {
@@ -71,12 +92,41 @@ export const canalTable = {
     capacity: 'DEFINE FIELD capacity ON TABLE canal TYPE number;',
     is_premium: 'DEFINE FIELD is_premium ON TABLE canal TYPE bool;',
     passphrase: 'DEFINE FIELD passphrase ON TABLE canal TYPE string;',
-    last_login: 'DEFINE FIELD last_login ON TABLE canal TYPE datetime DEFAULT time::now();',
+    totp_enabled: 'DEFINE FIELD totp_enabled ON TABLE canal TYPE bool DEFAULT false;',
+    auth_secret: 'DEFINE FIELD auth_secret ON TABLE canal TYPE option<string>;',
+    auth_salt: 'DEFINE FIELD auth_salt ON TABLE canal TYPE option<string>;',
     created_at: 'DEFINE FIELD created_at ON TABLE canal TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE canal TYPE datetime DEFAULT time::now();'
   },
   indices: {
     unique_passphrase: 'DEFINE INDEX unique_passphrase ON TABLE canal FIELDS passphrase UNIQUE;'
+  }
+}
+
+export const sessionTable = {
+  table: 'DEFINE TABLE session SCHEMAFULL;',
+  fields: {
+    canal: 'DEFINE FIELD user ON TABLE session TYPE record<canal>;',
+    browser: 'DEFINE FIELD browser ON TABLE session TYPE string;',
+    device: 'DEFINE FIELD device ON TABLE session TYPE string;',
+    os: 'DEFINE FIELD os ON TABLE session TYPE string;',
+    created_at: `DEFINE FIELD created_at ON TABLE session TYPE datetime DEFAULT time::now() READONLY;`,
+    expires_at: `DEFINE FIELD expires_at ON TABLE session TYPE datetime;`
+  },
+  indices: {}
+}
+
+export const authTable = {
+  table: 'DEFINE TABLE auth SCHEMAFULL;',
+  fields: {
+    canal: 'DEFINE FIELD canal ON TABLE auth TYPE record<canal>;',
+    token: 'DEFINE FIELD token ON TABLE auth TYPE string;',
+    attempts: 'DEFINE FIELD attempts ON TABLE auth TYPE number DEFAULT 3 ASSERT $value >= 0;',
+    created_at: `DEFINE FIELD created_at ON TABLE auth TYPE datetime DEFAULT time::now() READONLY;`,
+    expires_at: `DEFINE FIELD expires_at ON TABLE auth TYPE datetime;`
+  },
+  indices: {
+    unique_canal: 'DEFINE INDEX unique_canal ON TABLE auth FIELDS canal UNIQUE;'
   }
 }
 

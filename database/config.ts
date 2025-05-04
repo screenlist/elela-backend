@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
-import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable } from '../canal/canal.config.ts'
+import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable, authTable, sessionTable } from '../canal/canal.config.ts'
 import { paymentTable, rateTable } from "../payments/payments.config.ts"
 
 export async function getSurreal(): Promise<Surreal> {
@@ -218,6 +218,54 @@ export async function startUpDatabase(){
         const key = index as keyof typeof rateTable.indices;
         if(presentIndexes.indexOf(key) < 0){
           await db.query(rateTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('auth') < 0){
+      const schema =  `${authTable.table}\n` + Object.values(authTable.fields).join('\n') + Object.values(authTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const auth_info = await db.query<any[]>('INFO FOR TABLE auth;')
+
+      const presentFields = Object.entries(auth_info[0].fields).map(field => field[0])
+      for(const field in authTable.fields){
+        const key = field as keyof typeof authTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(authTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(auth_info[0].indexes).map(field => field[0])
+      for(const index in authTable.indices){
+        const key = index as keyof typeof authTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(authTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('session') < 0){
+      const schema =  `${sessionTable.table}\n` + Object.values(sessionTable.fields).join('\n') + Object.values(sessionTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const session_info = await db.query<any[]>('INFO FOR TABLE session;')
+
+      const presentFields = Object.entries(session_info[0].fields).map(field => field[0])
+      for(const field in sessionTable.fields){
+        const key = field as keyof typeof sessionTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(sessionTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(session_info[0].indexes).map(field => field[0])
+      for(const index in sessionTable.indices){
+        const key = index as keyof typeof sessionTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(sessionTable.indices[key])
         }
       }
     }
