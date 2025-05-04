@@ -5,14 +5,16 @@ import { RecordId, surql } from '@surrealdb/surrealdb'
 import { SignJWT } from '@panva/jose'
 import { promisify } from 'node:util'
 import { timingSafeEqual } from 'node:crypto'
+import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
+import { UAParser } from 'ua-parser-js'
 import { getSurreal } from '../database/config.ts'
-import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, findAVAXPayment } from '../utilities.ts'
+import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, findAVAXPayment, Obfuscator } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
-import { Canal, Bridge, RequestsTo, Wave, ConnectsWith  } from './canal.config.ts';
+import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth  } from './canal.config.ts';
 
 const db = await getSurreal()
-const canal = new Hono<{ Variables: {user: {id: string, table: string}} }>()
+const canal = new Hono<{ Variables: {user: {id: string, table: string, session: string}} }>()
 
 canal.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
@@ -99,24 +101,212 @@ canal.post('/auth', async c => {
   const phrase: string = data['phrase']
   if(!phrase){ throw new HTTPException(404, { message: 'No canal phrase was provided.' }) }
   const phraseHash = await encodeHMAC(phrase)
-  const getCanal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase = ${phraseHash} LIMIT 1;`))[0]
-  const isAuthentic = await verifyHMAC(phrase, getCanal[0].passphrase)
-  if(getCanal.length < 1 || isAuthentic === false){ throw new HTTPException(400, { message: 'Authorisarion failed' }) }
-  if(getCanal[0].capacity - getCanal[0].usage === 0){
+  const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase = ${phraseHash} LIMIT 1;`))[0][0]
+  const isAuthentic = await verifyHMAC(phrase, canal.passphrase)
+  if(!canal || isAuthentic === false){ throw new HTTPException(400, { message: 'Authorisarion failed' }) }
+  if(canal.capacity - canal.usage === 0 && canal.is_premium === false){
     throw new HTTPException(400, { message: 'Maximum usage reached.' })
   }
-  const canalId = getCanal[0].id.toString().split(':')[1]
+
+  if(canal.topt_enabled){
+
+    const authContent = {
+      token: new Obfuscator().generateKey(),
+      expires_at: new Date( Date.now() + 1000*60*3 ),
+      canal: canal.id
+    }
+    const auth = (await db.query<Array<Auth[]>>(surql`CREATE auth CONTENT ${authContent};`))[0][0]
+
+    return c.json({
+      id: canal.id.id.toString(),
+      auth_token: auth.token
+    })
+
+  } else {
+
+    const canalId = canal.id.id.toString()
+    const jwtSecret = Deno.env.get('JWT_SECRET')
+    const jwtExpiration = Deno.env.get('JWT_EXPIRATION_TIME')
+    if(!jwtExpiration || !jwtSecret){ throw new HTTPException(400, { message: 'Access token could not be generated' }) }
+    const encodedSecret =  encoder.encode(jwtSecret)
+    const { os, browser, device } = UAParser(c.req.header('User-Agent'))
+    const sessionContent = {
+      canal: canal.id,
+      browser: browser.name ? browser.name : 'Unknown',
+      device: device.type && device.vendor ? `${device.vendor} - ${device.type}` : 'Unknown',
+      os: os.name ? os.name : 'Unknown',
+      expires_at: new Date( Date.now() + 1000*60*20 )
+    }
+    const session = (await db.query<Array<Session[]>>(surql`CREATE session CONTENT ${sessionContent};`))[0][0]
+    const token = await new SignJWT({ id: canalId, role: 'sailor', sid: session.id.id.toString() }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
+    
+    return c.json({
+      id: canalId,
+      access_token: token
+    })
+
+  }
+  
+})
+
+canal.post('/2fa/verify', async  c => {
+  const { auth_token, topt_token } = await c.req.json()
+
+  const auth = (await db.query<Array<Auth[]>>(surql`SELECT * FROM auth WHERE token = ${auth_token};`))[0][0]
+
+  if(!auth){ throw new HTTPException(400, { message: 'The authentication token was not found' }) }
+  if(Date.now() > new Date( auth.expires_at ).valueOf() ){ throw new HTTPException(400, { message: 'The authentication token has expired, authenticate again' }) }
+  if(auth.attempts < 1){ throw new HTTPException(400, { message: 'Too many attempts, authenticate again' }) }
+
+  const canal = await db.select<Canal>(auth.canal)
+
+  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up' }) }
+
+  const obf = new Obfuscator()
+  const key = await obf.deriveKey(canal.auth_salt)
+  const secret = await obf.decrypt(canal.auth_secret, key)
+
+  const topt = new OTPAuth.TOTP({
+    issuer: 'Elela',
+    label: canal.id.id.toString(),
+    algorithm: 'SHA256', 
+    digits: 6,
+    period: 30,
+    secret: secret
+  })
+
+  const validity = topt.validate({token: topt_token, window: 1})
+  if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
+
+  const encoder = new TextEncoder()
   const jwtSecret = Deno.env.get('JWT_SECRET')
   const jwtExpiration = Deno.env.get('JWT_EXPIRATION_TIME')
   if(!jwtExpiration || !jwtSecret){ throw new HTTPException(400, { message: 'Access token could not be generated' }) }
   const encodedSecret =  encoder.encode(jwtSecret)
-  const token = await new SignJWT({ id: canalId, role: 'sailor' }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
-  
+  const { os, browser, device } = UAParser(c.req.header('User-Agent'))
+  const sessionContent = {
+    canal: canal.id,
+    browser: browser.name ? browser.name : 'Unknown',
+    device: device.type && device.vendor ? `${device.vendor} - ${device.type}` : 'Unknown',
+    os: os.name ? os.name : 'Unknown',
+    expires_at: new Date( Date.now() + 1000*60*20 )
+  }
+  const session = (await db.query<Array<Session[]>>(surql`CREATE session CONTENT ${sessionContent};`))[0][0]
+  const token = await new SignJWT({ id: canal.id.id.toString(), role: 'sailor', sid: session.id.id.toString() }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
+
   return c.json({
-    id: canalId,
+    id: canal.id.id.toString(),
     access_token: token
   })
-}) 
+})
+
+canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(canal.is_premium === false){ throw new HTTPException(403, { message: 'This feature is for paid canals' }) }
+  const topt = new OTPAuth.TOTP({
+    issuer: 'Elela',
+    label: canal.id.id.toString(),
+    algorithm: 'SHA256', 
+    digits: 6,
+    period: 30
+  })
+  const secret = topt.secret.base32
+  const uri = topt.toString()
+
+  const obf = new Obfuscator()
+  const salt = crypto.randomUUID()
+  const key = await obf.deriveKey(salt)
+  const encryptedSecret = await obf.encrypt(secret, key)
+
+  await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET auth_secret = ${encryptedSecret}, auth_salt = ${salt};`)
+  const authContent = {
+    token: new Obfuscator().generateKey(),
+    expires_at: new Date( Date.now() + 1000*60*3 ),
+    canal: canal.id
+  }
+  const auth = (await db.query<Array<Auth[]>>(surql`CREATE auth CONTENT ${authContent};`))[0][0]
+
+  c.json({ secret: secret, uri: uri, token: auth.token})
+})
+
+canal.post('/2fa/enable', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const { auth_token, topt_token } = await c.req.json()
+  const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  const auth = (await db.query<Array<Auth[]>>(surql`SELECT * FROM auth WHERE token = ${auth_token};`))[0][0]
+
+  if(Date.now() > new Date( auth.expires_at ).valueOf() ){ throw new HTTPException(400, { message: 'The authentication token has expired, authenticate again' }) }
+  if(auth.attempts < 1){ throw new HTTPException(400, { message: 'Too many attempts, authenticate again' }) }
+
+  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up' }) }
+
+  const obf = new Obfuscator()
+  const key = await obf.deriveKey(canal.auth_salt)
+  const secret = await obf.decrypt(canal.auth_secret, key)
+
+  const topt = new OTPAuth.TOTP({
+    issuer: 'Elela',
+    label: canal.id.id.toString(),
+    algorithm: 'SHA256', 
+    digits: 6,
+    period: 30,
+    secret: secret
+  })
+
+  const validity = topt.validate({token: topt_token, window: 1})
+  if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
+
+  await db.query(surql`
+    UPDATE type::record(${auth.id.toString()}, 'auth') SET attempts = ${--auth.attempts};
+    UPDATE type::record(${canal.id.toString()}, 'canal') SET topt_enabled = ${true};
+  `)
+
+  return c.json({ status: 'success' })
+})
+
+canal.post('/2fa/disable', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const { topt_token } = await c.req.json()
+  const canal = await db.select<Canal>(new RecordId('canal', user.id))
+
+  if(!canal.topt_enabled){ throw new HTTPException(400, { message: 'You have not configured 2FA' }) }
+  if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up, contact support' }) }
+
+  const obf = new Obfuscator()
+  const key = await obf.deriveKey(canal.auth_salt)
+  const secret = await obf.decrypt(canal.auth_secret, key)
+
+  const topt = new OTPAuth.TOTP({
+    issuer: 'Elela',
+    label: canal.id.id.toString(),
+    algorithm: 'SHA256', 
+    digits: 6,
+    period: 30,
+    secret: secret
+  })
+
+  const validity = topt.validate({token: topt_token, window: 1})
+  if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
+
+  await db.query(surql`
+    UPDATE type::record(${canal.id.toString()}, 'canal') SET topt_enabled = ${false};
+  `)
+
+  return c.json({ status: 'success' })
+})
+
+canal.get('/session', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const session = await db.select<Session>(new RecordId('session', user.session))
+  return c.json({
+    valid: true,
+    expires_at: session.expires_at
+  })
+})
 
 canal.post('/bridge', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
