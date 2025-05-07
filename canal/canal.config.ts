@@ -106,7 +106,7 @@ export const canalTable = {
 export const sessionTable = {
   table: 'DEFINE TABLE session SCHEMAFULL;',
   fields: {
-    canal: 'DEFINE FIELD user ON TABLE session TYPE record<canal>;',
+    canal: 'DEFINE FIELD canal ON TABLE session TYPE record<canal>;',
     browser: 'DEFINE FIELD browser ON TABLE session TYPE string;',
     device: 'DEFINE FIELD device ON TABLE session TYPE string;',
     os: 'DEFINE FIELD os ON TABLE session TYPE string;',
