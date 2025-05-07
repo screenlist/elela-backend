@@ -9,7 +9,7 @@ import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
 import { getSurreal } from '../database/config.ts'
-import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, findAVAXPayment, Obfuscator } from '../utilities.ts'
+import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth  } from './canal.config.ts';
 
@@ -23,6 +23,7 @@ canal.get('/', verifyRequest(['sailor']), async c => {
   const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)}`))[0]
   return c.json({
     usage: {
+      id: canal.id,
       capacity: canal.capacity,
       usage: canal.usage,
       is_premium: canal.is_premium,
@@ -63,8 +64,8 @@ canal.get('/generate', async (c) => {
     return c.json(canal)
 
   } if(ref && sender){
-    
-    const paymentAVAX = await findAVAXPayment(sender, ref)
+    const billing = new Billing()
+    const paymentAVAX = await billing.findAVAXPayment(sender, ref)
     if(!paymentAVAX) { throw new HTTPException(404, { message: 'Payment not found' }) }
     const payment = (await db.query<[Payment[]]>(surql`SELECT * FROM payment WHERE reference_code = ${ref};`))[0][0]
     if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
@@ -102,8 +103,11 @@ canal.post('/auth', async c => {
   if(!phrase){ throw new HTTPException(404, { message: 'No canal phrase was provided.' }) }
   const phraseHash = await encodeHMAC(phrase)
   const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase = ${phraseHash} LIMIT 1;`))[0][0]
+  console.log(canal)
+  if(!canal){ throw new HTTPException(400, { message: 'Authentication failed' }) }
+  console.log('what!')
   const isAuthentic = await verifyHMAC(phrase, canal.passphrase)
-  if(!canal || isAuthentic === false){ throw new HTTPException(400, { message: 'Authorisarion failed' }) }
+  if(isAuthentic === false){ throw new HTTPException(400, { message: 'Authentication failed' }) }
   if(canal.capacity - canal.usage === 0 && canal.is_premium === false){
     throw new HTTPException(400, { message: 'Maximum usage reached.' })
   }
@@ -306,6 +310,12 @@ canal.get('/session', verifyRequest(['sailor']), async c => {
     valid: true,
     expires_at: session.expires_at
   })
+})
+
+canal.post('/session/remove', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  await db.delete(new RecordId('session', user.session))
+  return c.json({ status: 'success' })
 })
 
 canal.post('/bridge', verifyRequest(['sailor']), async c => {
