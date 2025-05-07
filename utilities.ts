@@ -158,113 +158,162 @@ export async function reverseColorToWords(){
   return colorToWords
 }
 
-export function readableMoney(price: number) {
-  return parseFloat((price).toFixed(2)).toLocaleString('en-ZA', {style: 'currency', currency: 'ZAR'})
-}
+export class Billing {
 
-export function calculateUnitPrice(quantity: number){
-  const base = 0.15
-  const minimum = 0.09
-  const decay = 0.02
-  const difference = base - minimum
-  const discount = difference * Math.exp(-decay * quantity)
-  return minimum + discount
-}
+  calculateUnitPrice(quantity: number){
+    const base = 0.15
+    const minimum = 0.09
+    const decay = 0.02
+    const difference = base - minimum
+    const discount = difference * Math.exp(-decay * quantity)
+    return minimum + discount
+  }
 
-export function calculateUsagePoints(size: number, downloads: number){
-  const storagePerPoint = 5*(1024*1000)
-  const freeEgressMultiplier = 3
-  const egressPerByte = storagePerPoint * freeEgressMultiplier
-  const totalEgreePerByte = size * downloads
-  return Math.ceil(totalEgreePerByte/egressPerByte)
-}
+  subpointsToFlowpoints(subpoints: number){
+    return Math.round( subpoints / 100 ).toFixed(2)
+  }
 
-export function calculateJetsamCost(fileSizeBytes: number, desiredDownloads: number, retention = 1) {
-  const bytesPerGB = 1024 ** 3;
-  const storageCostPerGB = 0.006; // USD
-  const flowPointValueUSD = 0.03;
-  const egressCostPerGB = 0.01;
-  const egressPerFlowPointBytes = (flowPointValueUSD / egressCostPerGB) * bytesPerGB; // 3GB per flow point
+  flowpointsToSubpoints(flowpoints: number){
+    return flowpoints*100
+  }
 
-  const fileSizeGB = fileSizeBytes / bytesPerGB;
-  const storageCostUSD = fileSizeGB * storageCostPerGB;
-  const storageFlowPoints = Math.ceil(storageCostUSD / flowPointValueUSD);
+  calculateSubpoint(
+    fileSizeBytes: number,
+    desiredDownloads: number,
+    desiredRetentionMonths: number = 1
+  ) {
+    const bytesPerGB = 1024 ** 3;
+    const storageCostPerGBPerMonth = 0.006; // USD
+    const downloadCostPerGB = 0.01;         // USD
+    const flowPointValueUSD = 0.03;          // USD per Flowpoint
   
-  const remainingBudgetUSD = flowPointValueUSD - storageCostUSD;
-  const remainingEgressBytes = remainingBudgetUSD > 0
-    ? (remainingBudgetUSD / egressCostPerGB) * bytesPerGB
-    : 0;
+    const subpointsPerFlowpoint = 100
+  
+    const fileSizeGB = fileSizeBytes / bytesPerGB;
 
-  const freeEgressBytes = fileSizeBytes * 3;
-  const maxFreeEgressBytes = freeEgressBytes + remainingEgressBytes;
-  const maxDownloadsBeforeExtraPoints = Math.floor(maxFreeEgressBytes / fileSizeBytes);
+    const storageCostUSD = fileSizeGB * storageCostPerGBPerMonth * desiredRetentionMonths;
+    const downloadCostUSD = desiredDownloads <= 3 ? 0 : fileSizeGB * downloadCostPerGB * (desiredDownloads - 3);
 
-  const includedDownloads = Math.max(3, maxDownloadsBeforeExtraPoints);
-  const extraDownloads = Math.max(0, desiredDownloads - includedDownloads);
+    const storageSubpoints = Math.ceil((storageCostUSD / flowPointValueUSD) * subpointsPerFlowpoint);
+    const downloadSubpoints = Math.ceil((downloadCostUSD / flowPointValueUSD) * subpointsPerFlowpoint);
+    const totalSubpoints = storageSubpoints + downloadSubpoints
+  
+    return {
+      storage_subpoints: storageSubpoints,
+      downloads: desiredDownloads,
+      retention: desiredRetentionMonths,
+      download_subpoints: downloadSubpoints,
+      total_subpoints: totalSubpoints,
+    };
+  }
 
-  const billableEgressBytes = fileSizeBytes * extraDownloads;
-  const extraFlowPoints = Math.ceil(billableEgressBytes / egressPerFlowPointBytes);
+  async convertToTender(amount: number, tender: 'avax' | 'zar') {
+    const coinAPIUrl = Deno.env.get('COINAPI_URL')
+    const coinAPIKey = Deno.env.get('COINAPI_KEY')
+  
+    if(!coinAPIKey || !coinAPIUrl){ throw new HTTPException(404, { message: 'Exchange rate cannot be queried' }) }
+  
+    if(tender === 'zar'){
+      try {
+        const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'ZAR' LIMIT 1;`))[0][0]
+        if(!rate){
+  
+          const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+          const latestRate: CoinAPIResponse = await fetchRate.json()
+          if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+          const newRateContent = {
+            base: 'USD',
+            quote: 'ZAR',
+            amount: latestRate.rate
+          }
+          await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
+          return latestRate.rate*amount
+  
+        } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
+  
+          const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+          const latestRate: CoinAPIResponse = await fetchRate.json()
+          if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+          await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
+          return latestRate.rate*amount
+  
+        } else {
+          return rate.amount*amount
+        }
+      } catch (error) {
+        throw new HTTPException(404, { message: `Could not convert to South African Rands`, cause: error})
+      }
+    } else if(tender === 'avax'){
+      try {
+        const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'AVAX' LIMIT 1;`))[0][0]
+        if(!rate){
+  
+          const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+          const latestRate: CoinAPIResponse = await fetchRate.json()
+          if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+          const newRateContent = {
+            base: 'USD',
+            quote: 'AVAX',
+            amount: latestRate.rate
+          }
+          await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
+          return latestRate.rate*amount
+  
+        } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
+  
+          const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
+          const latestRate: CoinAPIResponse = await fetchRate.json()
+          if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
+          await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
+          return latestRate.rate*amount
+  
+        } else {
+          return rate.amount*amount
+        }
+      } catch (error) {
+        throw new HTTPException(404, { message: `Could not convert to Avalanche`, cause: error})
+      }
+    } else { 
+      throw new HTTPException(404, { message: 'Not enough parameters provided' })
+    }
+    
+  }
+  
+  async findAVAXPayment(sender: string, reference: string) {
+    const contractAddress = Deno.env.get('CONTRACT_ADDRESS')
+    const rpcURL = Deno.env.get('AVAX_RPC')
+  
+    if(!contractAddress || !rpcURL){ throw new HTTPException(400, { message: 'Contract address or provider not provided' }) }
+  
+    const contractABI = ['event PaymentReceived ( address indexed sender, uint256 amount, string invoice )']
+    const provider = new ethers.JsonRpcProvider(rpcURL)
+    const contract = new ethers.Contract(contractAddress, contractABI, provider)
+    const filter = contract.filters.PaymentReceived(sender)
+    try {
+      const events = await contract.queryFilter(filter, -1000)
+      for (const event of events) {
+        const key = event as ethers.EventLog
+        const { args } = key;
+        if (args && args.invoice === reference) {
+          return {
+            sender: args.sender,
+            amount: ethers.formatEther(args.amount),
+            reference: args.invoice,
+            transactionHash: key.transactionHash
+          };
+        }
+      }
+  
+      return null
+    } catch (error) {
+      throw new HTTPException(400, {message: 'Payment could not be verified', cause: error})
+    }
+  }
 
-  const totalFlowPoints = ( Math.round(retention)*storageFlowPoints ) + extraFlowPoints;
-
-  return {
-    strorage_points: storageFlowPoints*Math.round(retention),
-    downloads_per_point: includedDownloads,
-    extra_downloads: extraDownloads,
-    extra_download_points: extraFlowPoints,
-    retention_months: retention,
-    total_points: totalFlowPoints
-  };
+  readableMoney(price: number) {
+    return parseFloat((price).toFixed(2)).toLocaleString('en-ZA', {style: 'currency', currency: 'ZAR'})
+  }
 }
-
-function calculateJetsam(
-  fileSizeBytes: number,
-  desiredDownloads: number,
-  desiredRetentionMonths: number = 1
-) {
-  const bytesPerGB = 1024 ** 3;
-  const storageCostPerGBPerMonth = 0.006; // USD
-  const downloadCostPerGB = 0.01;         // USD
-  const flowPointValueUSD = 0.03;          // USD per Flowpoint
-
-  const fileSizeGB = fileSizeBytes / bytesPerGB;
-
-  // Storage Costs
-  const storageCostUSD = fileSizeGB * storageCostPerGBPerMonth * desiredRetentionMonths;
-
-  // Download Costs
-  const downloadCostUSD = desiredDownloads <= 3 ? 0 : fileSizeGB * downloadCostPerGB * (desiredDownloads - 3);
-
-  // Total Costs
-  const totalCostUSD = storageCostUSD + downloadCostUSD;
-
-  const totalFlowPoints = Math.ceil(totalCostUSD / flowPointValueUSD);
-
-  // Split back how many flowpoints are due to storage and downloads separately
-  const storageFlowPoints = Math.ceil(storageCostUSD / flowPointValueUSD);
-  const downloadFlowPoints = Math.ceil(downloadCostUSD / flowPointValueUSD);
-
-  const remainingFlowPointValueUSD = (totalFlowPoints * flowPointValueUSD) - totalCostUSD
-  const maxRemainingDownloads = remainingFlowPointValueUSD > 0 ? Math.floor(remainingFlowPointValueUSD / (fileSizeGB * downloadCostPerGB)) : 0
-  const maxRemainingRetention = remainingFlowPointValueUSD > 0 ? Math.floor(remainingFlowPointValueUSD / (fileSizeGB * storageCostPerGBPerMonth)) : 0
-
-  return {
-    storage_points: storageFlowPoints,
-    downloads: desiredDownloads,
-    retention: desiredRetentionMonths,
-    download_points: downloadFlowPoints,
-    remaining_value: {
-      usage: Math.round( (totalCostUSD / (totalFlowPoints * flowPointValueUSD)) * 100 ),
-      max_downloads: maxRemainingDownloads,
-      max_retention: maxRemainingRetention
-    },
-    total_points: totalFlowPoints,
-  };
-}
-
-
-console.log(calculateJetsam(5*1024*1024, 547, 116))
-console.log(calculateJetsamCost(5*1024*1024, 120, 24))
 
 export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
   return async (c: Context, next: Next) => {
@@ -354,111 +403,6 @@ export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wav
 
   throw new HTTPException(400, { message: `Could not generate flare after ${attempts} attemps` })
 }
-
-export async function convertToTender(amount: number, tender: 'avax' | 'zar') {
-  const coinAPIUrl = Deno.env.get('COINAPI_URL')
-  const coinAPIKey = Deno.env.get('COINAPI_KEY')
-
-  if(!coinAPIKey || !coinAPIUrl){ throw new HTTPException(404, { message: 'Exchange rate cannot be queried' }) }
-
-  if(tender === 'zar'){
-    try {
-      const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'ZAR' LIMIT 1;`))[0][0]
-      if(!rate){
-
-        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
-        const latestRate: CoinAPIResponse = await fetchRate.json()
-        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
-        const newRateContent = {
-          base: 'USD',
-          quote: 'ZAR',
-          amount: latestRate.rate
-        }
-        await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
-        return latestRate.rate*amount
-
-      } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
-
-        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/zar`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
-        const latestRate: CoinAPIResponse = await fetchRate.json()
-        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
-        await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
-        return latestRate.rate*amount
-
-      } else {
-        return rate.amount*amount
-      }
-    } catch (error) {
-      throw new HTTPException(404, { message: `Could not convert to South African Rands`, cause: error})
-    }
-  } else if(tender === 'avax'){
-    try {
-      const rate = (await db.query<[Rate[]]>(surql`SELECT * FROM rate WHERE base = 'USD' AND quote = 'AVAX' LIMIT 1;`))[0][0]
-      if(!rate){
-
-        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
-        const latestRate: CoinAPIResponse = await fetchRate.json()
-        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
-        const newRateContent = {
-          base: 'USD',
-          quote: 'AVAX',
-          amount: latestRate.rate
-        }
-        await db.query(surql`CREATE rate CONTENT ${newRateContent};`)
-        return latestRate.rate*amount
-
-      } else if(rate && Date.now() - new Date(rate.updated_at).valueOf() > (1000*60*30)){
-
-        const fetchRate = await fetch(`${coinAPIUrl}/v1/exchangerate/usd/avax`, { headers: { 'X-CoinAPI-Key': coinAPIKey, 'Accept': 'text/plain' } })
-        const latestRate: CoinAPIResponse = await fetchRate.json()
-        if(!fetchRate.ok){ throw new HTTPException( 404, { message: 'Exchange rate cannot be queried', cause: latestRate } ) }
-        await db.query(surql`UPDATE type::record(${rate.id.toString()}) SET amount = ${latestRate.rate}, updated_at = ${new Date()};`)
-        return latestRate.rate*amount
-
-      } else {
-        return rate.amount*amount
-      }
-    } catch (error) {
-      throw new HTTPException(404, { message: `Could not convert to Avalanche`, cause: error})
-    }
-  } else { 
-    throw new HTTPException(404, { message: 'Not enough parameters provided' })
-  }
-  
-}
-
-export async function findAVAXPayment(sender: string, reference: string) {
-  const contractAddress = Deno.env.get('CONTRACT_ADDRESS')
-  const rpcURL = Deno.env.get('AVAX_RPC')
-
-  if(!contractAddress || !rpcURL){ throw new HTTPException(400, { message: 'Contract address or provider not provided' }) }
-
-  const contractABI = ['event PaymentReceived ( address indexed sender, uint256 amount, string invoice )']
-  const provider = new ethers.JsonRpcProvider(rpcURL)
-  const contract = new ethers.Contract(contractAddress, contractABI, provider)
-  const filter = contract.filters.PaymentReceived(sender)
-  try {
-    const events = await contract.queryFilter(filter, -1000)
-    for (const event of events) {
-      const key = event as ethers.EventLog
-      const { args } = key;
-      if (args && args.invoice === reference) {
-        return {
-          sender: args.sender,
-          amount: ethers.formatEther(args.amount),
-          reference: args.invoice,
-          transactionHash: key.transactionHash
-        };
-      }
-    }
-
-    return null
-  } catch (error) {
-    throw new HTTPException(400, {message: 'Payment could not be verified', cause: error})
-  }
-}
-
-console.log(ethers.parseEther('0.0717'))
 
 export class Obfuscator {
 

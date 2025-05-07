@@ -2,9 +2,10 @@ import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
 import { RecordId, surql } from "@surrealdb/surrealdb"
 import { getSurreal } from "../database/config.ts";
-import { calculateJetsamCost, verifyRequest } from "../utilities.ts";
+import { Billing, verifyRequest } from "../utilities.ts";
 
 const db = await getSurreal()
+const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET')
 const jetsam = new Hono<{ Variables: {user: {id: string, table: string}} }>()
 
@@ -31,7 +32,7 @@ jetsam.post('/cost', c => {
 
   if(typeof Number(size) !== 'number'){ throw new HTTPException(404, { message: 'File size must be a number' }) }
 
-  return c.json(calculateJetsamCost(+size, downloads, retention))
+  return c.json(billing.calculateSubpoint(+size, downloads, retention))
 })
 
 jetsam.post('/start', verifyRequest(['sailor']), async c => {
