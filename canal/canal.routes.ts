@@ -23,7 +23,7 @@ canal.get('/', verifyRequest(['sailor']), async c => {
   const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)}`))[0]
   return c.json({
     usage: {
-      id: canal.id,
+      id: canal.id.id.toString(),
       capacity: canal.capacity,
       usage: canal.usage,
       is_premium: canal.is_premium,
@@ -61,7 +61,7 @@ canal.get('/generate', async (c) => {
       passphrase: canalHash
     }
     await db.query(surql`CREATE canal CONTENT ${content};`)
-    return c.json(canal)
+    return c.json({passphrase: canal, premium: true})
 
   } if(ref && sender){
     const billing = new Billing()
@@ -78,8 +78,8 @@ canal.get('/generate', async (c) => {
       passphrase: canalHash
     }
     await db.query(surql`CREATE canal CONTENT ${content};`)
-    console.log(payment.amount !== +paymentAVAX.amount)
-    return c.json(canal)
+    
+    return c.json({passphrase: canal, premium: true})
 
   } else {
 
@@ -90,7 +90,7 @@ canal.get('/generate', async (c) => {
       passphrase: canalHash
     }
     await db.query(surql`CREATE canal CONTENT ${content};`)
-    return c.json(canal)
+    return c.json({passphrase: canal, premium: false})
 
   }
 })
@@ -103,9 +103,7 @@ canal.post('/auth', async c => {
   if(!phrase){ throw new HTTPException(404, { message: 'No canal phrase was provided.' }) }
   const phraseHash = await encodeHMAC(phrase)
   const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase = ${phraseHash} LIMIT 1;`))[0][0]
-  console.log(canal)
   if(!canal){ throw new HTTPException(400, { message: 'Authentication failed' }) }
-  console.log('what!')
   const isAuthentic = await verifyHMAC(phrase, canal.passphrase)
   if(isAuthentic === false){ throw new HTTPException(400, { message: 'Authentication failed' }) }
   if(canal.capacity - canal.usage === 0 && canal.is_premium === false){
@@ -303,9 +301,19 @@ canal.post('/2fa/disable', verifyRequest(['sailor']), async c => {
   return c.json({ status: 'success' })
 })
 
-canal.get('/session', verifyRequest(['sailor']), async c => {
+canal.get('/session/validate', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const session = await db.select<Session>(new RecordId('session', user.session))
+  if(!session){ throw new HTTPException(404, { message: 'Session not found' }) }
+  return c.json(session)
+})
+
+canal.get('/session/poll', async c => {
+  const id = c.req.query('id')
+  if(!id){ throw new HTTPException(404, { message: 'Provide the session id' }) }
+  const session = await db.select<Session>(new RecordId('session', id))
+  if(!session){ throw new HTTPException(404, { message: 'Session not found' }) }
+  if(new Date(session.expires_at) < new Date()){ throw new HTTPException(404, { message: 'Session has expired' }) }
   return c.json({
     valid: true,
     expires_at: session.expires_at
