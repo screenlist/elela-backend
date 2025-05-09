@@ -137,7 +137,7 @@ canal.post('/auth', async c => {
       browser: browser.name ? browser.name : 'Unknown',
       device: device.type && device.vendor ? `${device.vendor} - ${device.type}` : 'Unknown',
       os: os.name ? os.name : 'Unknown',
-      expires_at: new Date( Date.now() + 1000*60*20 )
+      expires_at: new Date( Date.now() + 1000*60*30 )
     }
     const session = (await db.query<Array<Session[]>>(surql`CREATE session CONTENT ${sessionContent};`))[0][0]
     const token = await new SignJWT({ id: canalId, role: 'sailor', sid: session.id.id.toString() }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
@@ -192,7 +192,7 @@ canal.post('/2fa/verify', async  c => {
     browser: browser.name ? browser.name : 'Unknown',
     device: device.type && device.vendor ? `${device.vendor} - ${device.type}` : 'Unknown',
     os: os.name ? os.name : 'Unknown',
-    expires_at: new Date( Date.now() + 1000*60*20 )
+    expires_at: new Date( Date.now() + 1000*60*30 )
   }
   const session = (await db.query<Array<Session[]>>(surql`CREATE session CONTENT ${sessionContent};`))[0][0]
   const token = await new SignJWT({ id: canal.id.id.toString(), role: 'sailor', sid: session.id.id.toString() }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
