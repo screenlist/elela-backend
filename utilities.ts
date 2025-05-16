@@ -177,7 +177,7 @@ export class Billing {
     return flowpoints*100
   }
 
-  calculateSubpoint(
+  calculateSubpointForCargo(
     fileSizeBytes: number,
     desiredDownloads: number,
     desiredRetentionMonths: number = 1
@@ -205,6 +205,50 @@ export class Billing {
       download_subpoints: downloadSubpoints,
       total_subpoints: totalSubpoints,
     };
+  }
+
+  calculateSubpointForCalls(minutes: number){
+    const flowPointValueUSD = 0.03
+    const callCostPerMinuteUSD = 0.0015
+
+    const subpointsPerFlowpoint = 100
+
+    const callCostUSD = minutes * callCostPerMinuteUSD
+    const callSubpoints = Math.ceil( ( callCostUSD / flowPointValueUSD ) * subpointsPerFlowpoint )
+
+    return {
+      minutes: minutes,
+      subpoints: callSubpoints
+    }
+  }
+
+  calculateStorageFromSubpoints(subpoints: number){
+    const storageCostPerGBPerMonth = 0.006
+    const flowPointValueUSD = 0.03         
+    const subpointsPerFlowpoint = 100
+
+    const flowpoints = subpoints / subpointsPerFlowpoint
+    const totalCost = flowpoints * flowPointValueUSD
+    const storageGB = Math.round(totalCost / storageCostPerGBPerMonth)
+
+    return {
+      storage: storageGB,
+      downloads: Math.round(storageGB * 3)
+    }
+  }
+
+  calculateCallsFromSubpoints(subpoints: number){
+    const flowPointValueUSD = 0.03
+    const callCostPerMinuteUSD = 0.0015
+    const subpointsPerFlowpoint = 100
+
+    const flowpoints = subpoints / subpointsPerFlowpoint
+    const totalCost = flowpoints * flowPointValueUSD
+    const callMinutes = Math.round(totalCost / callCostPerMinuteUSD)
+
+    return {
+      minutes: callMinutes
+    }
   }
 
   async convertToTender(amount: number, tender: 'avax' | 'zar') {
