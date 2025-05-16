@@ -1,5 +1,6 @@
 import { Hono } from '@hono/hono'
 import { logger } from '@hono/hono/logger'
+import { cors } from '@hono/hono/cors'
 import { startUpDatabase } from "./database/config.ts"
 import canal from "./canal/canal.routes.ts"
 import payments from "./payments/payments.routes.ts"
@@ -9,7 +10,15 @@ import { HTTPException } from "@hono/hono/http-exception";
 const app = new Hono()
 startUpDatabase()
 
+const client = Deno.env.get('CLIENT_HOST')
+if(!client){ throw new Error('Provide a client host string') }
+
 app.use(logger())
+app.use(cors(
+  {
+    origin: client
+  }
+))
 app.onError((error, c) => {
   if(error instanceof HTTPException){
     return error.getResponse()
