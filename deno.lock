@@ -9,9 +9,9 @@
     "jsr:@std/internal@^1.0.6": "1.0.6",
     "jsr:@surrealdb/surrealdb@^1.2.1": "1.2.1",
     "npm:@types/node@*": "22.12.0",
+    "npm:cron@^4.3.0": "4.3.0",
     "npm:ethers@^6.13.5": "6.13.5",
     "npm:isows@^1.0.6": "1.0.6_ws@8.18.1",
-    "npm:node-cron@^3.0.3": "3.0.3",
     "npm:otpauth@^9.4.0": "9.4.0",
     "npm:ua-parser-js@^2.0.3": "2.0.3",
     "npm:uuidv7@^1.0.1": "1.0.2",
@@ -60,6 +60,9 @@
     "@noble/hashes@1.7.1": {
       "integrity": "sha512-B8XBPsn4vT/KJAGqDzbwztd+6Yte3P4V7iafm24bxgDe/mlRuK6xmWPuCNrKt2vDafZ8MfJLlchDG/vYafQEjQ=="
     },
+    "@types/luxon@3.6.2": {
+      "integrity": "sha512-R/BdP7OxEMc44l2Ex5lSXHoIXTB2JLNa3y2QISIbr58U/YcsffyQrYW//hZSdrfxrjRZj3GcUoxMPGdO8gSYuw=="
+    },
     "@types/node-fetch@2.6.12": {
       "integrity": "sha512-8nneRWKCg3rMtF69nLQJnOYUcbafYeFSjqkw3jCRLsqkWFlHaoQrr5mXmofFGOx3DKn7UfmBMyov8ySvLRVldA==",
       "dependencies": [
@@ -96,6 +99,13 @@
       "integrity": "sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==",
       "dependencies": [
         "delayed-stream"
+      ]
+    },
+    "cron@4.3.0": {
+      "integrity": "sha512-ciiYNLfSlF9MrDqnbMdRWFiA6oizSF7kA1osPP9lRzNu0Uu+AWog1UKy7SkckiDY2irrNjeO6qLyKnXC8oxmrw==",
+      "dependencies": [
+        "@types/luxon",
+        "luxon"
       ]
     },
     "delayed-stream@1.0.0": {
@@ -206,6 +216,9 @@
         "ws@8.18.1"
       ]
     },
+    "luxon@3.6.1": {
+      "integrity": "sha512-tJLxrKJhO2ukZ5z0gyjY1zPh3Rh88Ej9P7jNrZiHMUXHae1yvI2imgOZtL1TO8TW6biMMKfTtAOoEJANgtWBMQ=="
+    },
     "math-intrinsics@1.1.0": {
       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="
     },
@@ -216,12 +229,6 @@
       "integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
       "dependencies": [
         "mime-db"
-      ]
-    },
-    "node-cron@3.0.3": {
-      "integrity": "sha512-dOal67//nohNgYWb+nWmg5dkFdIwDm8EpeGYMekPMrngV3637lqnX0lbUcCtgibHTz6SEz7DAIjKvKDFYCnO1A==",
-      "dependencies": [
-        "uuid"
       ]
     },
     "node-fetch@2.7.0": {
@@ -261,9 +268,6 @@
     "undici-types@6.20.0": {
       "integrity": "sha512-Ny6QZ2Nju20vw1SRHe3d9jVu6gJ+4e3+MMpqu7pqE5HT6WsTSlce++GQmK5UXS8mzV8DSYHrQH+Xrf2jVcuKNg=="
     },
-    "uuid@8.3.2": {
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg=="
-    },
     "uuidv7@1.0.2": {
       "integrity": "sha512-8JQkH4ooXnm1JCIhqTMbtmdnYEn6oKukBxHn1Ic9878jMkL7daTI7anTExfY18VRCX7tcdn5quzvCb6EWrR8PA=="
     },
@@ -294,8 +298,8 @@
       "jsr:@std/assert@1",
       "jsr:@std/encoding@^1.0.10",
       "jsr:@surrealdb/surrealdb@^1.2.1",
+      "npm:cron@^4.3.0",
       "npm:ethers@^6.13.5",
-      "npm:node-cron@^3.0.3",
       "npm:otpauth@^9.4.0",
       "npm:ua-parser-js@^2.0.3",
       "npm:zod@^3.24.3"
