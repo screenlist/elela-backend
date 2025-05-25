@@ -3,7 +3,9 @@ import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
 import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable, authTable, sessionTable } from '../canal/canal.config.ts'
 import { paymentTable, rateTable } from "../payments/payments.config.ts"
 
-export async function getSurreal(): Promise<Surreal> {
+export const db = await getSurreal()
+
+async function getSurreal(): Promise<Surreal> {
   const url = Deno.env.get('DB_URL')
   const user = Deno.env.get('DB_USER')
   const pass = Deno.env.get('DB_PASS')
@@ -35,7 +37,6 @@ export async function getSurreal(): Promise<Surreal> {
 
 export async function startUpDatabase(){
   try {
-    const db = await getSurreal()
     const database_info = await db.query<any[]>('INFO FOR DB;')
     const tables = Object.entries(database_info[0].tables).map(tab => tab[0])
 
