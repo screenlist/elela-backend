@@ -1,14 +1,12 @@
 import { JWTPayload, jwtVerify } from '@panva/jose'
 import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
-import { getSurreal } from "./database/config.ts";
+import { db } from "./database/config.ts";
 import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
 import { encodeHex, decodeHex } from '@std/encoding'
 import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
 import { Session } from "./canal/canal.config.ts";
-
-const db = await getSurreal()
 
 async function _sortHexColorsFromBlackToWhite(path: string){
   const colorstext = await Deno.readTextFile(path)
@@ -170,7 +168,7 @@ export class Billing {
   }
 
   subpointsToFlowpoints(subpoints: number){
-    return Math.round( subpoints / 100 ).toFixed(2)
+    return ( subpoints / 100 ).toFixed(2)
   }
 
   flowpointsToSubpoints(flowpoints: number){
@@ -362,39 +360,36 @@ export class Billing {
 export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
   return async (c: Context, next: Next) => {
     const unixTimestamp = Math.floor(Date.now()/1000)
-    try {
-      const bearer = c.req.header('Authorization')
-      if(!bearer){ throw new HTTPException(401, {message: 'Access denied'}) }
-      const jwt = bearer.split(' ')[1]
-      const encoder = new TextEncoder()
-      const jwtSecret = Deno.env.get('JWT_SECRET')
-      const encodedSecret =  encoder.encode(jwtSecret)
-      const decodedJwt = await jwtVerify(jwt, encodedSecret)
-      const payload: JWTPayload & {role?: 'sailor' | 'seafarer', sid?: string} =  decodedJwt['payload']
-      if(!payload.exp || !payload.iat || !payload.role){
-        throw new HTTPException(401, { message: 'Access denied' })
-      }
-      if(unixTimestamp > payload.exp || payload.iat > unixTimestamp || roles.indexOf(payload.role) < 0){
-        throw new HTTPException(401, { message: 'Access denied' })
-      }
-
-      if(payload.role === 'sailor'){
-        if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
-        const session = await db.select<Session>(new RecordId('session', payload.sid))
-        if(Date.now() > new Date(session.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
-        const newExpiry = new Date( Date.now() + 1000*60*30 )
-        await db.query(surql`UPDATE type::record(${session.id.toString()}) SET expires_at = ${newExpiry}`)
-      }
-
-      c.set('user', {
-        id: payload.id,
-        table: payload.role === 'sailor' ? 'canal' : payload.role === 'seafarer' ? 'wave' : undefined,
-        session: payload.sid
-      })
-      await next()
-    } catch (error) {
-      throw new HTTPException(401, { message: 'Access denied', cause: error })
+    
+    const bearer = c.req.header('Authorization')
+    if(!bearer){ throw new HTTPException(401, {message: 'Access denied'}) }
+    const jwt = bearer.split(' ')[1]
+    const encoder = new TextEncoder()
+    const jwtSecret = Deno.env.get('JWT_SECRET')
+    const encodedSecret =  encoder.encode(jwtSecret)
+    const decodedJwt = await jwtVerify(jwt, encodedSecret)
+    const payload: JWTPayload & {role?: 'sailor' | 'seafarer', sid?: string} =  decodedJwt['payload']
+    if(!payload.exp || !payload.iat || !payload.role){
+      throw new HTTPException(401, { message: 'Access denied' })
     }
+    if(unixTimestamp > payload.exp || payload.iat > unixTimestamp || roles.indexOf(payload.role) < 0){
+      throw new HTTPException(401, { message: 'Access denied' })
+    }
+
+    if(payload.role === 'sailor'){
+      if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
+      const session = await db.select<Session>(new RecordId('session', payload.sid))
+      if(Date.now() > new Date(session.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
+      const newExpiry = new Date( Date.now() + 1000*60*30 )
+      await db.query(surql`UPDATE type::record(${session.id.toString()}) SET expires_at = ${newExpiry};`)
+    }
+
+    c.set('user', {
+      id: payload.id,
+      table: payload.role === 'sailor' ? 'canal' : payload.role === 'seafarer' ? 'wave' : undefined,
+      session: payload.sid
+    })
+    await next()
   }
 }
 
@@ -447,6 +442,8 @@ export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wav
 
   throw new HTTPException(400, { message: `Could not generate flare after ${attempts} attemps` })
 }
+
+
 
 export class Obfuscator {
 
