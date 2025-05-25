@@ -7,8 +7,18 @@ export interface CoinAPIResponse {
 	rate: number
 }
 
+export interface PaymentContent {
+  amount: number,
+  canal?: RecordId<string>
+  points: number,
+  reference_code: string,
+  currency: 'ZAR' | 'AVAX',
+  success: boolean
+}
+
 export type Payment = {
   id: RecordId<string>
+  canal?: RecordId<string>
   amount: number
   points: number
   reference_code: string
@@ -31,6 +41,7 @@ export type Rate = {
 export const paymentTable = {
   table: 'DEFINE TABLE payment SCHEMAFULL;',
   fields: {
+    canal: 'DEFINE FIELD canal ON TABLE payment TYPE option<record<canal>>',
     points: 'DEFINE FIELD points ON TABLE payment TYPE number;',
     transaction_id: 'DEFINE FIELD transaction_id ON TABLE payment TYPE option<number|string>;',
     amount: 'DEFINE FIELD amount ON TABLE payment TYPE number ASSERT $value > 0;',

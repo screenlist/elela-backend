@@ -1,16 +1,19 @@
 import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
-import { surql } from "@surrealdb/surrealdb"
-import { getSurreal } from "../database/config.ts"
-import { Billing } from "../utilities.ts"
+import { RecordId, surql } from '@surrealdb/surrealdb'
+import { db } from '../database/config.ts'
+import { Billing } from '../utilities.ts'
+import { z }  from 'zod'
+import { Canal } from "../canal/canal.config.ts";
+import { PaymentContent } from "./payments.config.ts"
 
-const db = await getSurreal()
 const payments = new Hono()
 const billing = new Billing()
 
 payments.get('/price', async c => {
-  const quantity = c.req.query('quantity') ? Number(c.req.query('quantity')) : 10
-  
+  const drops = c.req.query('quantity') ? c.req.query('quantity') : 10
+  const schema = z.number({coerce: true})
+  const quantity =  schema.parse(drops)
   try {
     const unitPriceUSD = billing.calculateUnitPrice(quantity)
     const unitPriceZAR = await billing.convertToTender(unitPriceUSD, 'zar')
@@ -38,15 +41,33 @@ payments.get('/fiat', async c => {
   const paystackUrl = Deno.env.get('PAYSTACK_URL')
   const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY')
 
-  const quantity = c.req.query('quantity') ? Number(c.req.query('quantity')) : 10
-  const email = c.req.query('email')
-  if(!email){ throw new HTTPException(404, {message: 'Please provide email'}) }
-  if(quantity < 10){ throw new HTTPException(404, {message: 'Flow points quantity must be at least 10'}) }
+  const schema = z.object({
+    quantity: z.number({coerce: true}).min(10, 'Quantity must be at least 10 or greater'),
+    email: z.string().email('Provide a valid email'),
+    conduit: z.string().optional()
+  })
+
+  const validation = schema.safeParse({
+    email: c.req.query('email'),
+    quantity: c.req.query('quantity'),
+    conduit: c.req.query('conduit')
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const message = ''
+    formatted._errors.forEach(val => message.concat(...`${val};`))
+    throw new HTTPException(404, { message: message  }) 
+  }
+ 
+  const { email, quantity, conduit } = validation.data
+  
   const unitPriceUSD = billing.calculateUnitPrice(quantity)
   const unitPriceZAR = await billing.convertToTender(unitPriceUSD, 'zar')
   const price = Math.round( quantity * unitPriceZAR * 100 ) / 100 
   const priceCents = (  price* 100 ).toString()
   const reference = crypto.randomUUID()
+  const redirect = conduit ? `${Deno.env.get('CLIENT_HOST')}/canal/settings/refill/fiat?ref=${reference}` : `${Deno.env.get('CLIENT_HOST')}/generate/phrase?ref=${reference}`
   try {
     const response = await fetch(`${paystackUrl}/transaction/initialize`, {
       method: 'POST',
@@ -58,7 +79,7 @@ payments.get('/fiat', async c => {
         email: decodeURIComponent(email),
         currency: 'ZAR',
         amount: priceCents,
-        callback_url: `${Deno.env.get('CLIENT_HOST')}/generate/phrase?ref=${reference}`,
+        callback_url: redirect,
         reference: reference
       })
     })
@@ -67,16 +88,21 @@ payments.get('/fiat', async c => {
 
     const initiated = await response.json()
 
-    const query = surql`
-      CREATE payment CONTENT {
-        amount: ${price},
-        points: ${billing.flowpointsToSubpoints(quantity)},
-        reference_code: ${reference},
-        currency: 'ZAR',
-        success: false
-      };
-    `
-    await db.query(query)
+    const paymentContent: PaymentContent = {
+      amount: price,
+      points: billing.flowpointsToSubpoints(quantity),
+      reference_code: reference,
+      currency: 'ZAR',
+      success: false
+    }
+
+    if(conduit){
+      const canal = await db.select<Canal>(new RecordId('canal', conduit))
+      if(!canal){ throw new HTTPException(404, { message: 'Payment failed, the canal does not exist' }) }
+      paymentContent.canal = canal.id
+    }
+
+    await db.query(surql`CREATE payment CONTENT ${paymentContent}`)
     return c.json({ url: initiated.data['authorization_url'] })
   } catch (error) {
     throw new HTTPException(404,{ message: 'Could not initiate payment', cause: error })
@@ -84,20 +110,44 @@ payments.get('/fiat', async c => {
 })
 
 payments.get('/crypto', async c => {
-  const quantity = c.req.query('quantity') ? Number(c.req.query('quantity')) : 10
-  if(quantity < 10){ throw new HTTPException(404, {message: 'Flow points quantity must be at least 10'}) }
+  const schema = z.object({
+    quantity: z.coerce.number({message: 'Quantity must be a number'}).min(10, 'Quantity must be at least 10 or greater'),
+    conduit: z.string().optional()
+  })
+
+  const validation =  schema.safeParse({
+    quantity: c.req.query('quantity'),
+    conduit: c.req.query('conduit')
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const message = ''
+    formatted._errors.forEach(val => message.concat(...`${val};`))
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { quantity, conduit } = validation.data
+
   const ref = crypto.randomUUID()
   
   const unitPriceUSD = billing.calculateUnitPrice(quantity)
   const unitPriceAVAX = await billing.convertToTender(unitPriceUSD, 'avax')
   const price = Math.round(quantity * unitPriceAVAX*10000)/10000
-  const paymentContent = {
+  const paymentContent: PaymentContent = {
     amount: price,
     currency: 'AVAX',
     success: false,
     reference_code: ref,
     points: billing.flowpointsToSubpoints(quantity)
   }
+
+  if(conduit){
+    const canal = await db.select<Canal>(new RecordId('canal', conduit))
+    if(!canal){ throw new HTTPException(404, { message: 'Payment failed, the canal does not exist' }) }
+    paymentContent.canal = canal.id
+  }
+
   await db.query(surql`CREATE payment CONTENT ${paymentContent};`)
   return c.json({
     quantity: billing.subpointsToFlowpoints( billing.flowpointsToSubpoints(quantity) ),

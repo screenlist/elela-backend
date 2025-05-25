@@ -8,25 +8,26 @@ import { timingSafeEqual } from 'node:crypto'
 import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
-import { getSurreal } from '../database/config.ts'
+import { db } from '../database/config.ts'
 import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth  } from './canal.config.ts';
 
-const db = await getSurreal()
 const canal = new Hono<{ Variables: {user: {id: string, table: string, session: string}} }>()
+const billing = new Billing()
 
 canal.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(!canal){ throw new HTTPException(404, { message: 'Canal not found' }) }
-  const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)}`))[0]
+  const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)};`))[0]
   return c.json({
     usage: {
       id: canal.id.id.toString(),
       capacity: canal.capacity,
       usage: canal.usage,
       is_premium: canal.is_premium,
+      created_at: canal.created_at
     },
     bridges
   })
@@ -54,15 +55,21 @@ canal.get('/generate', async (c) => {
     const payment = (await db.query<[Payment[]]>(surql`SELECT * FROM payment WHERE reference_code = ${ref};`))[0][0]
     if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
     await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
-    const content = {
-      usage: 0,
-      capacity: payment.points,
-      is_premium: true,
-      passphrase: canalHash
-    }
-    await db.query(surql`CREATE canal CONTENT ${content};`)
-    return c.json({passphrase: canal, premium: true})
 
+    if(payment.canal){
+      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal) SET capacity += ${payment.points};`)
+      return c.json({ points: billing.subpointsToFlowpoints(payment.points) })
+    } else {
+      const content = {
+        usage: 0,
+        capacity: payment.points,
+        is_premium: true,
+        passphrase: canalHash
+      }
+      await db.query(surql`CREATE canal CONTENT ${content};`)
+      return c.json({passphrase: canal, premium: true})
+    }
+    
   } if(ref && sender){
     const billing = new Billing()
     const paymentAVAX = await billing.findAVAXPayment(sender, ref)
@@ -71,21 +78,25 @@ canal.get('/generate', async (c) => {
     if(payment.success === true){ throw new HTTPException(404,{ message: 'Payment value has already been redeemed.' }) }
     if(payment.amount !== +paymentAVAX.amount){ new HTTPException(404, { message: 'The amount paid does not match the amount quoted' }) }
     await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${paymentAVAX.transactionHash};`)
-    const content = {
-      usage: 0,
-      capacity: payment.points,
-      is_premium: true,
-      passphrase: canalHash
-    }
-    await db.query(surql`CREATE canal CONTENT ${content};`)
-    
-    return c.json({passphrase: canal, premium: true})
 
+    if(payment.canal){
+      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal) SET capacity += ${payment.points};`)
+      return c.json({ points: billing.subpointsToFlowpoints(payment.points) })
+    } else {
+      const content = {
+        usage: 0,
+        capacity: payment.points,
+        is_premium: true,
+        passphrase: canalHash
+      }
+      await db.query(surql`CREATE canal CONTENT ${content};`)
+      return c.json({passphrase: canal, premium: true})
+    }
   } else {
 
     const content = {
       usage: 0,
-      capacity: 1,
+      capacity: billing.flowpointsToSubpoints(1),
       is_premium: false,
       passphrase: canalHash
     }
@@ -231,7 +242,7 @@ canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
   }
   const auth = (await db.query<Array<Auth[]>>(surql`CREATE auth CONTENT ${authContent};`))[0][0]
 
-  c.json({ secret: secret, uri: uri, token: auth.token})
+  return c.json({ secret: secret, uri: uri, token: auth.token})
 })
 
 canal.post('/2fa/enable', verifyRequest(['sailor']), async c => {
