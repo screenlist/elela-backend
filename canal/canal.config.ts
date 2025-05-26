@@ -11,7 +11,7 @@ export type Canal = {
   passphrase: string
   auth_secret?: string
   auth_salt?: string
-  topt_enabled: boolean
+  totp_enabled: boolean
   created_at: Date
   updated_at: Date
 }

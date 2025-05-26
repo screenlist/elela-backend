@@ -27,6 +27,7 @@ canal.get('/', verifyRequest(['sailor']), async c => {
       capacity: canal.capacity,
       usage: canal.usage,
       is_premium: canal.is_premium,
+      totp_enabled: canal.totp_enabled,
       created_at: canal.created_at
     },
     bridges
@@ -121,18 +122,30 @@ canal.post('/auth', async c => {
     throw new HTTPException(400, { message: 'Maximum usage reached.' })
   }
 
-  if(canal.topt_enabled){
+  if(canal.totp_enabled){
 
     const authContent = {
       token: new Obfuscator().generateKey(),
       expires_at: new Date( Date.now() + 1000*60*3 ),
       canal: canal.id
     }
-    const auth = (await db.query<Array<Auth[]>>(surql`CREATE auth CONTENT ${authContent};`))[0][0]
+    const auth = (await db.query<[undefined, Auth[]]>(surql`
+      LET $exist = count(SELECT * FROM auth WHERE canal = ${canal.id});
+      IF $exist > 0 {
+        THROW "You can only authenticate every 3 minutes"
+      } ELSE {
+        LET $new = CREATE auth CONTENT ${authContent};
+        RETURN $new;
+      };
+    `).catch((err) => {
+      throw new HTTPException(400, { message: err.message })
+    }))[1][0];
+
+    console.log(auth)
 
     return c.json({
       id: canal.id.id.toString(),
-      auth_token: auth.token
+      auth_token: authContent.token
     })
 
   } else {
@@ -163,7 +176,7 @@ canal.post('/auth', async c => {
 })
 
 canal.post('/2fa/verify', async  c => {
-  const { auth_token, topt_token } = await c.req.json()
+  const { auth_token, totp_token } = await c.req.json()
 
   const auth = (await db.query<Array<Auth[]>>(surql`SELECT * FROM auth WHERE token = ${auth_token};`))[0][0]
 
@@ -173,24 +186,30 @@ canal.post('/2fa/verify', async  c => {
 
   const canal = await db.select<Canal>(auth.canal)
 
-  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(!canal.totp_enabled){ throw new HTTPException(400, { message: 'You have not enabled 2FA' }) }
   if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up' }) }
 
   const obf = new Obfuscator()
   const key = await obf.deriveKey(canal.auth_salt)
   const secret = await obf.decrypt(canal.auth_secret, key)
 
-  const topt = new OTPAuth.TOTP({
+  const totp = new OTPAuth.TOTP({
     issuer: 'Elela',
     label: canal.id.id.toString(),
-    algorithm: 'SHA256', 
+    algorithm: 'SHA1', 
     digits: 6,
     period: 30,
-    secret: secret
+    secret: OTPAuth.Secret.fromBase32(secret)
   })
 
-  const validity = topt.validate({token: topt_token, window: 1})
-  if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
+  const validity = totp.validate({token: totp_token, window: 2})
+  
+  if(validity === null){ 
+    await db.query(surql`
+      UPDATE type::record(${auth.id.toString()}, 'auth') SET attempts -= 1;
+    `)
+    throw new HTTPException(400,  { message: 'The token is not valid' }) 
+  }
 
   const encoder = new TextEncoder()
   const jwtSecret = Deno.env.get('JWT_SECRET')
@@ -217,17 +236,17 @@ canal.post('/2fa/verify', async  c => {
 canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
-  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(canal.totp_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
   if(canal.is_premium === false){ throw new HTTPException(403, { message: 'This feature is for paid canals' }) }
-  const topt = new OTPAuth.TOTP({
+  const totp = new OTPAuth.TOTP({
     issuer: 'Elela',
     label: canal.id.id.toString(),
-    algorithm: 'SHA256', 
+    algorithm: 'SHA1', 
     digits: 6,
     period: 30
   })
-  const secret = topt.secret.base32
-  const uri = topt.toString()
+  const secret = totp.secret.base32
+  const uri = totp.toString()
 
   const obf = new Obfuscator()
   const salt = crypto.randomUUID()
@@ -247,35 +266,40 @@ canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
 
 canal.post('/2fa/enable', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const { auth_token, topt_token } = await c.req.json()
+  const { auth_token, totp_token } = await c.req.json()
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   const auth = (await db.query<Array<Auth[]>>(surql`SELECT * FROM auth WHERE token = ${auth_token};`))[0][0]
 
   if(Date.now() > new Date( auth.expires_at ).valueOf() ){ throw new HTTPException(400, { message: 'The authentication token has expired, authenticate again' }) }
   if(auth.attempts < 1){ throw new HTTPException(400, { message: 'Too many attempts, authenticate again' }) }
 
-  if(canal.topt_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
+  if(canal.totp_enabled){ throw new HTTPException(400, { message: 'You already have 2FA configured' }) }
   if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up' }) }
 
   const obf = new Obfuscator()
   const key = await obf.deriveKey(canal.auth_salt)
   const secret = await obf.decrypt(canal.auth_secret, key)
 
-  const topt = new OTPAuth.TOTP({
+  const totp = new OTPAuth.TOTP({
     issuer: 'Elela',
     label: canal.id.id.toString(),
-    algorithm: 'SHA256', 
+    algorithm: 'SHA1', 
     digits: 6,
     period: 30,
-    secret: secret
+    secret: OTPAuth.Secret.fromBase32(secret)
   })
 
-  const validity = topt.validate({token: topt_token, window: 1})
-  if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
+  const validity = totp.validate({token: totp_token, window: 3})
 
-  await db.query(surql`
-    UPDATE type::record(${auth.id.toString()}, 'auth') SET attempts = ${--auth.attempts};
-    UPDATE type::record(${canal.id.toString()}, 'canal') SET topt_enabled = ${true};
+  if(validity === null){
+    await db.query(surql`
+      UPDATE type::record(${auth.id.toString()}, 'auth') SET attempts -= 1;
+    `)
+    throw new HTTPException(400,  { message: 'The token is not valid' })
+  }
+
+ await db.query(surql`
+    UPDATE type::record(${canal.id.toString()}, 'canal') SET totp_enabled = ${true}, updated_at = time::now();
   `)
 
   return c.json({ status: 'success' })
@@ -283,30 +307,31 @@ canal.post('/2fa/enable', verifyRequest(['sailor']), async c => {
 
 canal.post('/2fa/disable', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const { topt_token } = await c.req.json()
+  const { totp_token } = await c.req.json()
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
 
-  if(!canal.topt_enabled){ throw new HTTPException(400, { message: 'You have not configured 2FA' }) }
+  if(!canal.totp_enabled){ throw new HTTPException(400, { message: 'You have not configured 2FA' }) }
   if(!canal.auth_salt || !canal.auth_secret){ throw new HTTPException(400, { message: 'Your 2FA configuration is not correctly set up, contact support' }) }
 
   const obf = new Obfuscator()
   const key = await obf.deriveKey(canal.auth_salt)
   const secret = await obf.decrypt(canal.auth_secret, key)
 
-  const topt = new OTPAuth.TOTP({
+  const totp = new OTPAuth.TOTP({
     issuer: 'Elela',
     label: canal.id.id.toString(),
-    algorithm: 'SHA256', 
+    algorithm: 'SHA1', 
     digits: 6,
     period: 30,
-    secret: secret
+    secret: OTPAuth.Secret.fromBase32(secret)
   })
 
-  const validity = topt.validate({token: topt_token, window: 1})
+  const validity = totp.validate({token: totp_token, window: 2})
+
   if(validity === null){ throw new HTTPException(400,  { message: 'The token is not valid' }) }
 
   await db.query(surql`
-    UPDATE type::record(${canal.id.toString()}, 'canal') SET topt_enabled = ${false};
+    UPDATE type::record(${canal.id.toString()}, 'canal') SET totp_enabled = ${false}, auth_salt = NONE, auth_secret = NONE, updated_at = time::now();
   `)
 
   return c.json({ status: 'success' })
