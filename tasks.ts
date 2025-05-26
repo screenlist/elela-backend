@@ -5,6 +5,6 @@ import { surql } from "@surrealdb/surrealdb";
 export const clean2faSetups = CronJob.from({
   cronTime: '0 * * * * *',
   onTick: async function(){
-    await db.query(surql`DELETE auth WHERE created_at < time::now()-3m;`)
+    await db.query(surql`DELETE auth WHERE expires_at < time::now();`)
   },
 })
