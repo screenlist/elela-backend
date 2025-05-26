@@ -20,4 +20,6 @@ export type Cargo = {
 
 export type UploadSession = {
   id: RecordId<string>
+  total_chunks: number
+  
 }
