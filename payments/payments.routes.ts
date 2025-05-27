@@ -67,7 +67,7 @@ payments.get('/fiat', async c => {
   const price = Math.round( quantity * unitPriceZAR * 100 ) / 100 
   const priceCents = (  price* 100 ).toString()
   const reference = crypto.randomUUID()
-  const redirect = conduit ? `${Deno.env.get('CLIENT_HOST')}/canal/settings/refill/fiat?ref=${reference}` : `${Deno.env.get('CLIENT_HOST')}/generate/phrase?ref=${reference}`
+  const redirect = `${Deno.env.get('CLIENT_HOST')}/generate/phrase?ref=${reference}`
   try {
     const response = await fetch(`${paystackUrl}/transaction/initialize`, {
       method: 'POST',
