@@ -58,7 +58,7 @@ canal.get('/generate', async (c) => {
     await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${transaction.data.id};`)
 
     if(payment.canal){
-      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal) SET capacity += ${payment.points};`)
+      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal') SET capacity += ${payment.points};`)
       return c.json({ points: billing.subpointsToFlowpoints(payment.points) })
     } else {
       const content = {
@@ -81,7 +81,7 @@ canal.get('/generate', async (c) => {
     await db.query(surql`UPDATE type::record(${payment.id.toString()}, 'payment') SET success = ${true}, updated_at = ${new Date()}, transaction_id = ${paymentAVAX.transactionHash};`)
 
     if(payment.canal){
-      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal) SET capacity += ${payment.points};`)
+      await db.query(surql`UPDATE type::record(${payment.canal}, 'canal') SET capacity += ${payment.points};`)
       return c.json({ points: billing.subpointsToFlowpoints(payment.points) })
     } else {
       const content = {
@@ -141,11 +141,9 @@ canal.post('/auth', async c => {
       throw new HTTPException(400, { message: err.message })
     }))[1][0];
 
-    console.log(auth)
-
     return c.json({
       id: canal.id.id.toString(),
-      auth_token: authContent.token
+      auth_token: auth.token
     })
 
   } else {
@@ -259,7 +257,17 @@ canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
     expires_at: new Date( Date.now() + 1000*60*3 ),
     canal: canal.id
   }
-  const auth = (await db.query<Array<Auth[]>>(surql`CREATE auth CONTENT ${authContent};`))[0][0]
+  const auth = (await db.query<[undefined, Auth[]]>(surql`
+    LET $exist = count(SELECT * FROM auth WHERE canal = ${canal.id});
+    IF $exist > 0 {
+      THROW "You can only authenticate every 3 minutes"
+    } ELSE {
+      LET $new = CREATE auth CONTENT ${authContent};
+      RETURN $new;
+    };
+  `).catch((err) => {
+    throw new HTTPException(400, { message: err.message })
+  }))[1][0];
 
   return c.json({ secret: secret, uri: uri, token: auth.token})
 })
@@ -344,6 +352,12 @@ canal.get('/session/validate', verifyRequest(['sailor']), async c => {
   return c.json(session)
 })
 
+canal.get('/session/all', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const sessions = (await db.query<Array<Session[]>>(surql`SELECT * FROM session WHERE canal = ${new RecordId('canal', user.id)} AND expires_at > time::now();`))[0]
+  return c.json(sessions)
+})
+
 canal.get('/session/poll', async c => {
   const id = c.req.query('id')
   if(!id){ throw new HTTPException(404, { message: 'Provide the session id' }) }
@@ -361,6 +375,7 @@ canal.post('/session/remove', verifyRequest(['sailor']), async c => {
   await db.delete(new RecordId('session', user.session))
   return c.json({ status: 'success' })
 })
+
 
 canal.post('/bridge', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
