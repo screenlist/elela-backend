@@ -1,7 +1,7 @@
 import { Hono } from '@hono/hono'
 import { upgradeWebSocket } from '@hono/hono/deno'
 import { HTTPException } from '@hono/hono/http-exception'
-import { RecordId, surql } from '@surrealdb/surrealdb'
+import { PreparedQuery, RecordId, surql } from '@surrealdb/surrealdb'
 import { SignJWT } from '@panva/jose'
 import { promisify } from 'node:util'
 import { timingSafeEqual } from 'node:crypto'
@@ -20,7 +20,6 @@ canal.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(!canal){ throw new HTTPException(404, { message: 'Canal not found' }) }
-  const bridges = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE canal = ${new RecordId(user.table, user.id)};`))[0]
   return c.json({
     usage: {
       id: canal.id.id.toString(),
@@ -29,8 +28,21 @@ canal.get('/', verifyRequest(['sailor']), async c => {
       is_premium: canal.is_premium,
       totp_enabled: canal.totp_enabled,
       created_at: canal.created_at
-    },
-    bridges
+    }
+  })
+})
+
+canal.get('/statistics', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
+  if(!canal){ throw new HTTPException(404, { message: 'Canal not found' }) }
+  const scheduled_bridges = await db.query<Array<number>>(surql`RETURN count(SELECT * FROM bridge WHERE canal = ${canal.id} AND start_time > time::now());`)
+  const expressed_interest = await db.query<Array<number>>(surql`RETURN count(SELECT * FROM requests_to WHERE out.canal = ${canal.id} AND out.start_time > time::now());`)
+  const active_bridges = await db.query<Array<number>>(surql`RETURN count(SELECT * FROM bridge WHERE canal = ${canal.id} AND start_time < time::now() AND end_time > time::now());`)
+  return c.json({
+    active_bridges: active_bridges[0],
+    scheduled_bridges: scheduled_bridges[0],
+    expressed_interest: expressed_interest[0]
   })
 })
 
@@ -377,18 +389,33 @@ canal.post('/session/remove', verifyRequest(['sailor']), async c => {
 })
 
 
-canal.post('/bridge', verifyRequest(['sailor']), async c => {
+canal.post('/bridges', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const schema = z.object({
     flare: z.string().trim().refine(val => {
       const words = val.split(/\s+/)
-      return words.length === 2 && words.every((word) => word.length >= 4)
-    }, { message: 'Flare must be exactly two words, each at least 4 characters long'}),
-    start_time: z.preprocess((arg) => ( typeof arg === 'string' || arg instanceof Date ? new Date(arg) : undefined ), z.date())
+      return words.length === 2 && words.every((word) => word.length >= 4) && words.every((word) => word.length <= 15)
+    }, { message: 'Flare must be exactly two words, each of at least 4 but no more than 15 characters long'}),
+    start_time: z.preprocess((arg) => ( typeof arg === 'string' || arg instanceof Date ? new Date(arg) : undefined ), z.date()).refine(val => {
+      return val > new Date()
+    }, { message: 'You cannot schedule a bridge to a past date' })
   })
   
   const body = await c.req.json()
-  const { flare, start_time } = schema.parse({flare: body.flare, start_time: body.start_time})
+
+  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
+    if(formatted.start_time){ formatted.start_time?._errors.forEach(val => message += `${val};`) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { flare, start_time } = validation.data
+
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(canal.capacity - canal.usage === 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
   const start = new Date(start_time).valueOf()
@@ -404,7 +431,43 @@ canal.post('/bridge', verifyRequest(['sailor']), async c => {
   return c.json(newBridge[0])
 })
 
-canal.get('/bridge/:id', verifyRequest(['sailor']), async c => {
+canal.get('/bridges', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const destination = c.req.query('status')
+
+  const schema = z.string().refine(val => {
+    return (val === 'active' || val === 'upcoming')
+  }, { message: 'The status of the bridges must be either active or upcoming' })
+
+  const validation = schema.safeParse(destination)
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const status = validation.data
+  let query: PreparedQuery
+  switch(status){
+    case 'active':
+      query = surql``;
+      break;
+    case 'upcoming':
+      query = surql``;
+      break;
+    default:
+      query = surql``;
+      break;
+  }
+
+  const bridges = (await db.query<Array<Bridge[]>>(query))[0]
+
+  return c.json(bridges)
+})
+
+canal.get('/bridges/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
 
@@ -417,7 +480,7 @@ canal.get('/bridge/:id', verifyRequest(['sailor']), async c => {
   })
 })
 
-canal.post('/bridge/:id/connect', verifyRequest(['sailor']), async c => {
+canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
   const schema = z.string()
@@ -438,7 +501,7 @@ canal.post('/bridge/:id/connect', verifyRequest(['sailor']), async c => {
   return c.json({connection: 'successful'})
 })
 
-canal.get('/bridge/:id/connections', verifyRequest(['sailor']), async c => {
+canal.get('/bridges/:id/connections', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
 
@@ -453,13 +516,26 @@ canal.post('/wave', async c => {
     anchor: z.string().trim().refine(val => val.length >= 10, { message: 'The anchor must be at least 10 characters long' }),
     counterflare: z.string().trim().refine(val => {
       const words = val.split(/\s+/)
-      return words.length === 2 && words.every((word) => word.length >= 4)
-    }, { message: 'Counterflare must be exactly two words, each at least 4 characters long'}),
+      return words.length === 2 && words.every((word) => word.length >= 4) && words.every((word) => word.length <= 15)
+    }, { message: 'Counterflare must be exactly two words, each of at least 4 but no more than characters long'}),
     flare: z.string()
   })
   
   const body = await c.req.json()
-  const { anchor, counterflare, flare } = schema.parse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare})
+  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
+    if(formatted.counterflare){ formatted.counterflare?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.anchor){ formatted.anchor?._errors.forEach(val => message += `${val}; `) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { flare, counterflare, anchor } = validation.data
+
   const bridge = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1;`))[0][0]
   if(!bridge){ throw new HTTPException(400, { message: 'Action not allowed' }) }
   const { scrypt } = await import('node:crypto')
@@ -483,7 +559,9 @@ canal.post('/wave', async c => {
   
   return c.json({
     counterflare: newWave.public_code,
-    start_time: bridge.start_time
+    flare: bridge.public_code,
+    start_time: bridge.start_time,
+    end_time: bridge.end_time
   })
 })
 
