@@ -55,8 +55,11 @@ payments.get('/fiat', async c => {
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
-    const message = ''
-    formatted._errors.forEach(val => message.concat(...`${val};`))
+    let message = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.email){formatted.email._errors.forEach(val => message += `${val}; `)}
+    if(formatted.quantity){formatted.quantity._errors.forEach(val => message += `${val}; `)}
+    if(formatted.conduit){formatted.conduit._errors.forEach(val => message += `${val}; `)}
     throw new HTTPException(404, { message: message  }) 
   }
  
@@ -122,8 +125,10 @@ payments.get('/crypto', async c => {
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
-    const message = ''
-    formatted._errors.forEach(val => message.concat(...`${val};`))
+    let message = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.quantity){formatted.quantity._errors.forEach(val => message += `${val}; `)}
+    if(formatted.conduit){formatted.conduit._errors.forEach(val => message += `${val}; `)}
     throw new HTTPException(404, { message: message  }) 
   }
 
