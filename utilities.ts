@@ -115,7 +115,7 @@ export async function emojiware(length: number){
   }} = JSON.parse(emojitext)
   const emojiArray = Object.entries(emojiObject).filter(item => {
     const version = +item[1].unicode_version
-    return version <= 10
+    return version < 8
   }).map(item => item[0])
   let emojis = ''
   const randomValues = crypto.getRandomValues(new Uint8Array(length))
