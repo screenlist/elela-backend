@@ -220,6 +220,21 @@ export class Billing {
     }
   }
 
+  calculateSubpointForBridge(minutes: number){
+    const flowPointValueUSD = 0.03
+    const bridgeCostPerMinuteUSD = 0.0005
+
+    const subpointsPerFlowpoint = 100
+
+    const bridgeCostUSD = minutes * bridgeCostPerMinuteUSD
+    const bridgeSubpoints = Math.ceil( ( bridgeCostUSD / flowPointValueUSD ) * subpointsPerFlowpoint )
+
+    return {
+      minutes: minutes,
+      subpoints: bridgeSubpoints
+    }
+  }
+
   calculateStorageFromSubpoints(subpoints: number){
     const storageCostPerGBPerMonth = 0.006
     const flowPointValueUSD = 0.03         
