@@ -451,18 +451,45 @@ canal.get('/bridges', verifyRequest(['sailor']), async c => {
   const status = validation.data
   let query: PreparedQuery
   switch(status){
-    case 'active':
-      query = surql``;
-      break;
     case 'upcoming':
-      query = surql``;
+      query = surql`
+        SELECT
+        count(<-requests_to<-wave) as responses, 
+        count(<-connects_with<-wave) as connections,
+        id,
+        start_time,
+        end_time,
+        public_code as flare,
+        created_at
+        FROM bridge WHERE canal = ${new RecordId('canal', user.id)} AND start_time > time::now() ORDER BY start_time ASC;
+      `;
       break;
-    default:
-      query = surql``;
+    case 'active':
+      query = surql`
+        SELECT
+        count(<-requests_to<-wave) as responses, 
+        count(<-connects_with<-wave) as connections,
+        id,
+        start_time,
+        end_time,
+        public_code as flare,
+        created_at
+        FROM bridge WHERE canal = ${new RecordId('canal', user.id)} AND start_time < time::now() AND end_time > time::now() ORDER BY start_time ASC;
+      `;
       break;
   }
 
-  const bridges = (await db.query<Array<Bridge[]>>(query))[0]
+  type WorkingBridge = {
+    id: RecordId<string>
+    flare: string
+    start_time: Date,
+    end_time: Date,
+    created_at: Date,
+    connections: number,
+    responses: number
+  }
+
+  const bridges = (await db.query<Array<WorkingBridge[]>>(query))[0]
 
   return c.json(bridges)
 })
