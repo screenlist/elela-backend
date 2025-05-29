@@ -417,7 +417,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
   const { flare, start_time } = validation.data
 
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
-  if(canal.capacity - canal.usage === 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
+  if(canal.capacity - canal.usage <= 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
   const start = new Date(start_time).valueOf()
   const end = start + 1000*60*20
   const code = await generateUniqueFlare(flare, 'bridge', 120)
@@ -427,7 +427,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     start_time: new Date(start),
     end_time: new Date(end)
   }
-  const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
+  const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${billing.calculateSubpointForBridge(20).subpoints};`)
   return c.json(newBridge[0])
 })
 
@@ -498,13 +498,31 @@ canal.get('/bridges/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
 
-  const bridge = await db.select<Bridge>(new RecordId('bridge', id))
-  if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
-  const waves = (await db.query<[number]>(surql`RETURN count(SELECT * FROM requests_to WHERE out = ${bridge.id});`))[0]
-  return c.json({
-    bridge: bridge,
-    waves: waves
-  })
+  type WorkingBridge = {
+    id: RecordId<string>
+    flare: string
+    start_time: Date,
+    end_time: Date,
+    created_at: Date,
+    connections: number,
+    responses: number
+  }
+
+  const bridge = (await db.query<Array<WorkingBridge[]>>(surql`
+    SELECT
+    count(<-requests_to<-wave) as responses, 
+    count(<-connects_with<-wave) as connections,
+    id,
+    start_time,
+    end_time,
+    public_code as flare,
+    created_at
+    FROM bridge WHERE canal = ${new RecordId('canal', user.id)} AND id = ${new RecordId('bridge', id)} AND end_time >= time::now();
+  `))[0][0]
+
+  if(!bridge){ throw new HTTPException(404, { message: 'The bridge cannot be located' }) }
+
+  return c.json(bridge)
 })
 
 canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
