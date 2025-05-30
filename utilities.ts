@@ -207,7 +207,7 @@ export class Billing {
 
   calculateSubpointForCalls(minutes: number){
     const flowPointValueUSD = 0.03
-    const callCostPerMinuteUSD = 0.0015
+    const callCostPerMinuteUSD = 0.002
 
     const subpointsPerFlowpoint = 100
 
