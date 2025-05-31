@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
-import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable, authTable, sessionTable } from '../canal/canal.config.ts'
+import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable, authTable, sessionTable, visitTable } from '../canal/canal.config.ts'
 import { paymentTable, rateTable } from "../payments/payments.config.ts"
 
 export const db = await getSurreal()
@@ -267,6 +267,30 @@ export async function startUpDatabase(){
         const key = index as keyof typeof sessionTable.indices;
         if(presentIndexes.indexOf(key) < 0){
           await db.query(sessionTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('visit') < 0){
+      const schema =  `${visitTable.table}\n` + Object.values(visitTable.fields).join('\n') + Object.values(visitTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const visit_info = await db.query<any[]>('INFO FOR TABLE visit;')
+
+      const presentFields = Object.entries(visit_info[0].fields).map(field => field[0])
+      for(const field in visitTable.fields){
+        const key = field as keyof typeof visitTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(visitTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(visit_info[0].indexes).map(field => field[0])
+      for(const index in visitTable.indices){
+        const key = index as keyof typeof visitTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(visitTable.indices[key])
         }
       }
     }

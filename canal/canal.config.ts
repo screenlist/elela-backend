@@ -26,6 +26,16 @@ export type Session = {
   expires_at: Date
 }
 
+export type Visit = {
+  id: RecordId<string>
+  wave: RecordId<string>
+  browser: string
+  device: string
+  os: string
+  created_at: Date
+  expires_at: Date
+}
+
 export type Auth = {
   id: RecordId<string>
   canal: RecordId<string>
@@ -114,6 +124,21 @@ export const sessionTable = {
     expires_at: `DEFINE FIELD expires_at ON TABLE session TYPE datetime;`
   },
   indices: {}
+}
+
+export const visitTable = {
+  table: 'DEFINE TABLE visit SCHEMAFULL;',
+  fields: {
+    wave: 'DEFINE FIELD wave ON TABLE visit TYPE record<wave>;',
+    browser: 'DEFINE FIELD browser ON TABLE visit TYPE string;',
+    device: 'DEFINE FIELD device ON TABLE visit TYPE string;',
+    os: 'DEFINE FIELD os ON TABLE visit TYPE string;',
+    created_at: `DEFINE FIELD created_at ON TABLE visit TYPE datetime DEFAULT time::now() READONLY;`,
+    expires_at: `DEFINE FIELD expires_at ON TABLE visit TYPE datetime;`
+  },
+  indices: {
+    unique_wave: 'DEFINE INDEX unique_wave ON TABLE visit FIELDS wave UNIQUE;'
+  }
 }
 
 export const authTable = {

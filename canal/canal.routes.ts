@@ -11,7 +11,7 @@ import { UAParser } from 'ua-parser-js'
 import { db } from '../database/config.ts'
 import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
-import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth  } from './canal.config.ts';
+import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit  } from './canal.config.ts';
 
 const canal = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave', session: string}} }>()
 const billing = new Billing()
@@ -576,6 +576,20 @@ canal.get('/bridges/:id/connections', verifyRequest(['sailor']), async c => {
   return c.json(connections)
 })
 
+canal.get('/wave', verifyRequest(['seafarer']), async c => {
+  const user = c.get('user')
+  const connection = (await db.query<Array<ConnectsWith[]>>(surql`SELECT * FROM connects_with WHERE in = ${new RecordId('wave', user.id)};`))[0][0]
+  if(!connection){ throw new HTTPException(404, { message: 'No connection was found' }) }
+  const bridge = await db.select(connection.out)
+  return c.json({
+    approved: true,
+    access_token: null,
+    connection_path: `/canal/connection/${connection.id.id.toString()}`,
+    start_time: bridge.start_time,
+    end_time: bridge.end_time
+  })
+})
+
 canal.post('/wave', async c => {
   const schema = z.object({
     anchor: z.string().trim().refine(val => val.length >= 10, { message: 'The anchor must be at least 10 characters long' }),
@@ -647,10 +661,12 @@ canal.post('/wave/auth', async c => {
   const bridge = one[0]
   const wave = two[0]
 
-  const connection = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id});`))[0]
-
   if(!bridge){ throw new HTTPException(400, { message: 'This bridge has collapsed' }) }
   if(!wave){  throw new HTTPException(400,  { message: 'This wave has stopped' }) }
+
+  const session = (await db.query<Array<number>>(surql`RETURN count(SELECT * FROM visit WHERE wave = ${wave.id});`))[0]
+
+  if(session > 0){ throw new HTTPException(400, { message: 'You have an active session, logout first before proceeding' }) }
 
   const { scrypt } = await import('node:crypto')
   const scryptAsync = promisify(scrypt) as (
@@ -664,28 +680,50 @@ canal.post('/wave/auth', async c => {
 
   if(match === false){ throw new HTTPException(400, { message: 'This wave does not recognise the anchor' }) }
 
-  if(connection === 1){
+  const connection = (await db.query<Array<ConnectsWith[]>>(surql`SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id};`))[0][0]
+
+  if(connection){
     const waveId = wave.id.id
     const jwtSecret = Deno.env.get('JWT_SECRET')
     const jwtExpiration = new Date(bridge.end_time)
     if(!jwtExpiration || !jwtSecret){ throw new HTTPException(400, { message: 'Access token could not be generated' }) }
     const encodedSecret =  encoder.encode(jwtSecret)
-    const token = await new SignJWT({ id: waveId, role: 'seafarer' }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
+
+    const { os, browser, device } = UAParser(c.req.header('User-Agent'))
+    const visitContent = {
+      wave: wave.id,
+      browser: browser.name ? browser.name : 'Unknown',
+      device: device.type && device.vendor ? `${device.vendor} - ${device.type}` : 'Unknown',
+      os: os.name ? os.name : 'Unknown',
+      expires_at: new Date( bridge.end_time )
+    }
+
+    const visit = (await db.query<Array<Visit[]>>(surql`CREATE visit CONTENT ${visitContent};`))[0][0]
+
+    const token = await new SignJWT({ id: waveId, sid: visit.id.id.toString(), role: 'seafarer' }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(jwtExpiration).sign(encodedSecret)
 
     return c.json({
       approved: true,
       access_token: token,
-      connection_path: `/canal/connection/${wave.id.id}:${bridge.id.id}`,
-      start_time: bridge.start_time
+      connection_path: `/canal/connection/${connection.id.id.toString()}`,
+      start_time: bridge.start_time,
+      end_time: bridge.end_time
     })
   } else {
     return c.json({
       approved: false,
       access_token: null,
       connection_path: null,
-      start_time: bridge.start_time
+      start_time: bridge.start_time,
+      end_time: bridge.end_time
     })
   }
+})
+
+canal.post('/wave/remove', verifyRequest(['seafarer']), async c => {
+  const user = c.get('user')
+  await db.delete(new RecordId('wave', user.session))
+  return c.json({ status: 'success' })
 })
 
 canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {

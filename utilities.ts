@@ -6,7 +6,7 @@ import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
 import { encodeHex, decodeHex } from '@std/encoding'
 import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
-import { Session } from "./canal/canal.config.ts";
+import { Session, Visit } from "./canal/canal.config.ts";
 
 async function _sortHexColorsFromBlackToWhite(path: string){
   const colorstext = await Deno.readTextFile(path)
@@ -397,6 +397,12 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
       if(Date.now() > new Date(session.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
       const newExpiry = new Date( Date.now() + 1000*60*30 )
       await db.query(surql`UPDATE type::record(${session.id.toString()}) SET expires_at = ${newExpiry};`)
+    }
+
+    if(payload.role === 'seafarer'){
+      if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
+      const visit = await db.select<Visit>(new RecordId('visit', payload.sid))
+      if(Date.now() > new Date(visit.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
     }
 
     c.set('user', {
