@@ -13,7 +13,7 @@ import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassph
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth  } from './canal.config.ts';
 
-const canal = new Hono<{ Variables: {user: {id: string, table: string, session: string}} }>()
+const canal = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave', session: string}} }>()
 const billing = new Billing()
 
 canal.get('/', verifyRequest(['sailor']), async c => {
@@ -688,7 +688,36 @@ canal.post('/wave/auth', async c => {
   }
 })
 
-canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async (c, next) => {
+canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  let query: PreparedQuery
+
+  switch(user.table){
+    case 'canal':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND out.canal = ${new RecordId('canal', user.id)};`
+      break;
+    case 'wave':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND in = ${new RecordId('wave', user.id)};`
+      break;
+  }
+
+  const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
+
+  if(!is_connected){ throw new HTTPException(404, { message: 'Connection not found' }) }
+
+  const bridge = await db.select<Bridge>(is_connected.out)
+
+  c.json({
+    connection_id: is_connected.id,
+    bridge_id: bridge.id,
+    wave_id: is_connected.in,
+    start_time: bridge.start_time,
+    end_time: bridge.end_time
+  })
+})
+
+canal.get('/chat/:id', verifyRequest(['sailor', 'seafarer']), async (c, next) => {
   const user = c.get('user')
   const id = c.req.param('id')
   const waveId = id.split(':')[0]
