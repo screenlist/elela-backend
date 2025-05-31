@@ -508,6 +508,12 @@ canal.get('/bridges/:id', verifyRequest(['sailor']), async c => {
     responses: number
   }
 
+  type Connection = {
+    id: RecordId<string>,
+    connection_id: RecordId<string>
+    counterflare: string
+  }
+
   const bridge = (await db.query<Array<WorkingBridge[]>>(surql`
     SELECT
     count(<-requests_to<-wave) as responses, 
@@ -522,7 +528,11 @@ canal.get('/bridges/:id', verifyRequest(['sailor']), async c => {
 
   if(!bridge){ throw new HTTPException(404, { message: 'The bridge cannot be located' }) }
 
-  return c.json(bridge)
+  const connection = (await db.query<Array<Connection[]>>(surql`
+    SELECT id as connection_id, in.id as id, in.public_code as counterflare FROM connects_with WHERE out.id = ${new RecordId('bridge', id)};
+  `))[0][0]
+
+  return c.json({bridge, connection})
 })
 
 canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
