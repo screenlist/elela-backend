@@ -538,10 +538,20 @@ canal.get('/bridges/:id', verifyRequest(['sailor']), async c => {
 canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
-  const schema = z.string()
+  const schema = z.string({message: 'Response flare is required'})
 
   const body = await c.req.json()
-  const counterflare =  schema.parse(body.counterflare)
+  const validation =  schema.safeParse(body.counterflare)
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const counterflare = validation.data
+
   const bridge = await db.select<Bridge>(new RecordId('bridge', id))
   const canal = await db.select<Canal>(new RecordId('canal', id))
   if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
