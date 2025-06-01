@@ -584,7 +584,7 @@ canal.get('/wave', verifyRequest(['seafarer']), async c => {
   return c.json({
     approved: true,
     access_token: null,
-    connection_path: `/canal/connection/${connection.id.id.toString()}`,
+    connection_id: connection.id.id.toString(),
     start_time: bridge.start_time,
     end_time: bridge.end_time
   })
@@ -653,7 +653,20 @@ canal.post('/wave/auth', async c => {
   })
 
   const body = await c.req.json()
-  const { anchor, counterflare, flare } = schema.parse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare})
+  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
+    if(formatted.counterflare){ formatted.counterflare?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.anchor){ formatted.anchor?._errors.forEach(val => message += `${val}; `) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { flare, counterflare, anchor } = validation.data
+
   const [one, two] = await db.query<[Bridge[], Wave[]]>(surql`
     SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1; 
     SELECT * FROM wave WHERE public_code = ${counterflare} LIMIT 1;
@@ -662,7 +675,7 @@ canal.post('/wave/auth', async c => {
   const wave = two[0]
 
   if(!bridge){ throw new HTTPException(400, { message: 'This bridge has collapsed' }) }
-  if(!wave){  throw new HTTPException(400,  { message: 'This wave has stopped' }) }
+  if(!wave){  throw new HTTPException(400,  { message: 'This response never reached its destination' }) }
 
   const session = (await db.query<Array<number>>(surql`RETURN count(SELECT * FROM visit WHERE wave = ${wave.id});`))[0]
 
@@ -678,7 +691,7 @@ canal.post('/wave/auth', async c => {
   const storedSecret = hexToBytes(wave.secret_code)
   const match = timingSafeEqual(storedSecret, provideSecret)
 
-  if(match === false){ throw new HTTPException(400, { message: 'This wave does not recognise the anchor' }) }
+  if(match === false){ throw new HTTPException(400, { message: 'The response or the anchor is wrong' }) }
 
   const connection = (await db.query<Array<ConnectsWith[]>>(surql`SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id};`))[0][0]
 
@@ -705,7 +718,7 @@ canal.post('/wave/auth', async c => {
     return c.json({
       approved: true,
       access_token: token,
-      connection_path: `/canal/connection/${connection.id.id.toString()}`,
+      connection_id: connection.id.id.toString(),
       start_time: bridge.start_time,
       end_time: bridge.end_time
     })
@@ -713,7 +726,7 @@ canal.post('/wave/auth', async c => {
     return c.json({
       approved: false,
       access_token: null,
-      connection_path: null,
+      connection_id: null,
       start_time: bridge.start_time,
       end_time: bridge.end_time
     })
@@ -722,7 +735,7 @@ canal.post('/wave/auth', async c => {
 
 canal.post('/wave/remove', verifyRequest(['seafarer']), async c => {
   const user = c.get('user')
-  await db.delete(new RecordId('wave', user.session))
+  await db.delete(new RecordId('visit', user.session))
   return c.json({ status: 'success' })
 })
 
