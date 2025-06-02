@@ -441,7 +441,7 @@ export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wav
     try {
       const firstOneEmojis = await emojiware(1)
       const lastTwoEmojis = await emojiware(2)
-      const flare = `${firstOneEmojis} ${phrase} ${lastTwoEmojis}`
+      const flare = table === "wave" ? `${lastTwoEmojis} ${phrase} ${firstOneEmojis}` : `${firstOneEmojis} ${phrase} ${lastTwoEmojis}`
       const bridgeQuery = surql`RETURN count(SELECT * FROM bridge WHERE public_code = ${flare});`
       const waveQuery = surql`RETURN count(SELECT * FROM wave WHERE public_code = ${flare});`
 
