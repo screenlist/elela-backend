@@ -9,12 +9,15 @@ import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
 import { db } from '../database/config.ts'
-import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing } from '../utilities.ts'
+import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing, broadcast } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
-import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit  } from './canal.config.ts';
+import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit, Message, ConversationWith  } from './canal.config.ts';
+import { WSContext } from "@hono/hono/ws";
 
 const canal = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave', session: string}} }>()
 const billing = new Billing()
+const conversations = new Map<string, Map<string, WSContext<WebSocket>>>()
+const all_messages = new Map<string, Set<ConversationWith>>()
 
 canal.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
@@ -388,7 +391,6 @@ canal.post('/session/remove', verifyRequest(['sailor']), async c => {
   return c.json({ status: 'success' })
 })
 
-
 canal.post('/bridges', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const schema = z.object({
@@ -564,16 +566,6 @@ canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
     await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
   }
   return c.json({connection: 'successful'})
-})
-
-canal.get('/bridges/:id/connections', verifyRequest(['sailor']), async c => {
-  const user = c.get('user')
-  const id = c.req.param('id')
-
-  const bridge = await db.select<Bridge>(new RecordId('bridge', id))
-  if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
-  const connections = (await db.query<[ConnectsWith[]]>(surql`SELECT * FROM connects_with WHERE out = ${bridge.id};`))[0]
-  return c.json(connections)
 })
 
 canal.get('/wave', verifyRequest(['seafarer']), async c => {
@@ -755,57 +747,242 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
 
   const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
 
-  if(!is_connected){ throw new HTTPException(404, { message: 'Connection not found' }) }
+  if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
 
   const bridge = await db.select<Bridge>(is_connected.out)
+  const text = (await db.query<Array<ConversationWith[]>>(surql`SELECT * FROM conversation_with WHERE out = ${is_connected.id} ORDER created_at ASC LIMIT 100;`))[0]
 
-  c.json({
+  return c.json({
     connection_id: is_connected.id,
     bridge_id: bridge.id,
     wave_id: is_connected.in,
     start_time: bridge.start_time,
-    end_time: bridge.end_time
+    end_time: bridge.end_time,
+    messages: text
   })
 })
 
-canal.get('/chat/:id', verifyRequest(['sailor', 'seafarer']), async (c, next) => {
+canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  const waveId = id.split(':')[0]
-  const bridgeId = id.split(':')[1]
-  if(user.table === 'wave' && waveId !== user.id){ throw new HTTPException(403, { message: 'Action not allowed' }) }
-  const wave = await db.select<Wave>(new RecordId('wave', waveId))
-  const bridge = await db.select<Bridge>(new RecordId('bridge', bridgeId))
+  let query: PreparedQuery
+
+  switch(user.table){
+    case 'canal':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND out.canal = ${new RecordId('canal', user.id)};`
+      break;
+    case 'wave':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND in = ${new RecordId('wave', user.id)};`
+      break;
+  }
+
+  const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
+
+  if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
+
+  const wave = await db.select<Wave>(is_connected.in)
+  const bridge = await db.select<Bridge>(is_connected.out)
+
   if(!wave || !bridge){ throw new HTTPException(403, { message: 'The connection is not allowed' }) }
   if(user.table === 'canal' && bridge.canal.id !== user.id) { throw new HTTPException(403, { message: 'Action not allowed' }) }
-  const connection = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE in = ${wave.id} AND out = ${bridge.id});`))[0]
-  if(connection !== 1){ throw new HTTPException(403, { message: 'The connection is not allowed' }) }
+
   if(bridge.start_time > new Date()){ throw new HTTPException(403, { message: 'The connection is not active yet' }) }
   if(bridge.end_time < new Date()){ throw new HTTPException(403, { message: 'The connection is not longer active' }) }
   await next()
-}, upgradeWebSocket(c => {
-  console.log(c.req.path)
+}, upgradeWebSocket(async c => {
+  const user:  {id: string, table: 'canal' | 'wave', session: string} = c.get('user')
+
+  let user_id: RecordId<string>
+  const meet = await db.select<ConnectsWith>(new RecordId('connects_with', c.req.param('id')))
+
+  if(user.table === 'canal'){
+    user_id = meet.out
+  } else {
+    user_id = meet.in
+  }
+
+  const conversation = conversations.get(meet.id.toString()) ?? new Map<string, WSContext<WebSocket>>()
+  const messages = all_messages.get(meet.id.toString()) ?? new Set<ConversationWith>()
+  
   return {
-    onMessage: (event, ws) => {
-      console.log(event)
-      console.log(ws)
+    onMessage: async (event, ws) => {
+
       const value = event.data as string
-      ws.send(value)
+      try {
+
+        const msg: Message  = JSON.parse(value)
+        const now = new Date()
+
+        switch(msg.type){
+          case 'text': {
+
+            const content = {
+              body: msg.data.message,
+              has_attachment: false
+            }
+
+            const saved = (await db.query<Array<ConversationWith[]>>(surql`
+              RELATE ${user_id}->conversation_with->${meet.id} CONTENT ${content};
+            `).catch(_err => {
+              ws.send(JSON.stringify({
+                type: 'error',
+                data: {
+                  from: user_id.toString(),
+                  message: 'Your message could be sent.',
+                  created_at: now
+                }
+              }))
+            }))
+
+            if(saved){
+              const message = saved[0][0]
+              messages.add(message)
+              all_messages.set(meet.id.toString(), messages)
+              broadcast({
+                clients: conversation,
+                sender: user_id.toString(),
+                everywhere: true,
+                message: JSON.stringify({
+                  type: 'text',
+                  data: message
+                })
+              })
+            }
+
+            break;
+
+          }
+          case 'typing':
+            broadcast({
+              clients: conversation,
+              sender: user_id.toString(),
+              everywhere: false,
+              message: JSON.stringify({
+                type: 'typing',
+                data: {
+                  from: user_id.toString(),
+                  message: 'Typing...',
+                  created_at: now
+                }
+              })
+            })
+            break;
+          case 'joined':
+            broadcast({
+              clients: conversation,
+              sender: user_id.toString(),
+              everywhere: false,
+              message: JSON.stringify({
+                type: 'joined',
+                data: {
+                  from: user_id.toString(),
+                  message: `${user_id.toString()} has joined`,
+                  created_at: now
+                }
+              })
+            })
+            break;
+          case 'left':
+            broadcast({
+              clients: conversation,
+              sender: user_id.toString(),
+              everywhere: false,
+              message: JSON.stringify({
+                type: 'left',
+                data: {
+                  from: user_id.toString(),
+                  message: `${user_id.toString()} has left`,
+                  created_at: now
+                }
+              })
+            })
+            break;
+        }
+
+      } catch (_error) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          data: { message: 'Error processing your message' }
+        }))
+      }
     },
-    onOpen: (event, ws) => {
-      console.log(event)
-      console.log(ws)
-      ws.send('Successfully connected')
+    onOpen: (_event, ws) => {
+
+      const now = new Date()
+      if(conversation.size >= 2 || conversation.has(user_id.toString())){ 
+        ws.send(JSON.stringify({
+          type: 'error',
+          data: {
+            message: 'This bridge is fully occupied',
+            from: user_id.toString(),
+            created_at: now
+          }
+        }))
+        ws.close()
+      } else {
+        conversation.set(user_id.toString(), ws)
+        conversations.set(meet.id.toString(),  conversation)
+
+        ws.send(JSON.stringify({
+          type: 'text_history',
+          data: Array.from(messages)
+        }))
+
+        broadcast({
+          clients: conversation,
+          sender: user_id.toString(),
+          everywhere: false,
+          message: JSON.stringify({
+            type: 'joined',
+            data: {
+              from: user_id.toString(),
+              message: `${user_id.toString()} has joined`,
+              created_at: now
+            }
+          })
+        })
+      }
+
     },
-    onClose: (event, ws) => {
-      console.log(event)
-      console.log(ws)
-      ws.send('One client closed')
+    onClose: (_event, _ws) => {
+
+      const now = new Date()
+      conversation.delete(user_id.toString())
+      broadcast({
+        clients: conversation,
+        sender: user_id.toString(),
+        everywhere: false,
+        message: JSON.stringify({
+          type: 'left',
+          data: {
+            from: user_id.toString(),
+            message: `${user_id.toString()} has left`,
+            created_at: now
+          }
+        })
+      })
+      if(conversation.size === 0){ conversations.delete(meet.id.toString()) }
+
     },
-    onError: (event, ws) => {
-      console.log(event)
-      console.log(ws)
-      ws.close(1002, `I'm out, peace.`)
+    onError: (_event, ws) => {
+
+      const now = new Date()
+      conversation.delete(user_id.toString())
+      ws.close(1002, `You have encountered an error.`)
+      broadcast({
+        clients: conversation,
+        sender: user_id.toString(),
+        everywhere: false,
+        message: JSON.stringify({
+          type: 'left',
+          data: {
+            from: user_id.toString(),
+            message: `${user_id.toString()} has left`,
+            created_at: now
+          }
+        })
+      })
+      if(conversation.size === 0){ conversations.delete(meet.id.toString()) }
     }
   }
 }, {

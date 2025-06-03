@@ -17,12 +17,18 @@ if(!client){ throw new Error('Provide a client host string') }
 clean2faSetups.start()
 
 app.use(logger())
-app.use(cors(
-  {
-    origin: client
+app.use((c, next) => {
+  if(c.req.path.startsWith('/canal/realtime/') || c.req.path.startsWith('/canal/connection/')){
+    return next()
+  } else {
+    const corsHandler = cors({
+      origin: client
+    })
+    return corsHandler(c, next)
   }
-))
+}) 
 app.onError((error, c) => {
+  console.log(error)
   if(error instanceof HTTPException){
     return error.getResponse()
   }

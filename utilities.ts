@@ -1,12 +1,14 @@
 import { JWTPayload, jwtVerify } from '@panva/jose'
 import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
+import { getCookie } from '@hono/hono/cookie'
 import { db } from "./database/config.ts";
 import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
 import { encodeHex, decodeHex } from '@std/encoding'
 import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
 import { Session, Visit } from "./canal/canal.config.ts";
+import { Broadcaster } from './canal/canal.config.ts'
 
 async function _sortHexColorsFromBlackToWhite(path: string){
   const colorstext = await Deno.readTextFile(path)
@@ -376,9 +378,11 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
   return async (c: Context, next: Next) => {
     const unixTimestamp = Math.floor(Date.now()/1000)
     
-    const bearer = c.req.header('Authorization')
+    const bearer = c.req.header('Authorization')?.split(' ')[1] || getCookie(c, 'visitor_token') || getCookie(c, 'access_token')
+    
     if(!bearer){ throw new HTTPException(401, {message: 'Access denied'}) }
-    const jwt = bearer.split(' ')[1]
+    console.log(bearer)
+    const jwt = bearer
     const encoder = new TextEncoder()
     const jwtSecret = Deno.env.get('JWT_SECRET')
     const encodedSecret =  encoder.encode(jwtSecret)
@@ -464,7 +468,15 @@ export async function generateUniqueFlare(phrase: string, table: 'bridge' | 'wav
   throw new HTTPException(400, { message: `Could not generate flare after ${attempts} attemps` })
 }
 
-
+export function broadcast(info: Broadcaster){
+  if(info.everywhere){
+    info.clients.forEach(client => { client.send(info.message) })
+  } else {
+    info.clients.forEach((client, id) => {
+      if(id !== info.sender){ client.send(info.message) }
+    })
+  }
+}
 
 export class Obfuscator {
 
