@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
-import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversesWithTable, authTable, sessionTable, visitTable } from '../canal/canal.config.ts'
+import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversationWithTable, authTable, sessionTable, visitTable } from '../canal/canal.config.ts'
 import { paymentTable, rateTable } from "../payments/payments.config.ts"
 
 export const db = await getSurreal()
@@ -160,17 +160,17 @@ export async function startUpDatabase(){
       }
     }
 
-    if(tables.indexOf('converses_with') < 0){
-      const schema =  `${conversesWithTable.table}\n` + Object.values(conversesWithTable.fields).join('\n');
+    if(tables.indexOf('conversation_with') < 0){
+      const schema =  `${conversationWithTable.table}\n` + Object.values(conversationWithTable.fields).join('\n');
       const definition = new PreparedQuery(schema)
       await db.query(definition)
     } else { 
-      const conversesWith_info = await db.query<any[]>('INFO FOR TABLE converses_with;')
-      const presentFields = Object.entries(conversesWith_info[0].fields).map(field => field[0])
-      for(const field in conversesWithTable.fields){
-        const key = field as keyof typeof conversesWithTable.fields;
+      const conversationWith_info = await db.query<any[]>('INFO FOR TABLE conversation_with;')
+      const presentFields = Object.entries(conversationWith_info[0].fields).map(field => field[0])
+      for(const field in conversationWithTable.fields){
+        const key = field as keyof typeof conversationWithTable.fields;
         if(presentFields.indexOf(key) < 0){
-          await db.query(conversesWithTable.fields[key])
+          await db.query(conversationWithTable.fields[key])
         }
       }
     }

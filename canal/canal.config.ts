@@ -1,3 +1,20 @@
+import { WSContext } from "@hono/hono/ws"
+
+/** INTERFACES */
+
+export interface Broadcaster {
+  clients: Map<string, WSContext<WebSocket>>, 
+  sender: string, 
+  everywhere: boolean, 
+  message: string
+}
+
+export interface Message {
+  type: 'text' | 'error' | 'joined' | 'left' | 'typing' | 'text_sent'
+  data: {
+    message: string
+  }
+}
 
 /** TYPES */
 
@@ -80,14 +97,12 @@ export type ConnectsWith = {
   created_at: string
 }
 
-export type ConversesWith =  {
+export type ConversationWith =  {
   id: RecordId<string>
-  in: RecordId<string> // Wave
-  out: RecordId<string> // Canal
-  chat: RecordId<string> // Bridge
-  from: RecordId<string> // Canal || Wave
+  in: RecordId<string> // Wave || Bridge
+  out: RecordId<string> // ConnectsWith 
   body: string
-  reply_to: RecordId<string> // ConverseWith
+  reply_to?: RecordId<string> // ConversationWith
   has_attachment: boolean
   attachment?: RecordId<string>
   created_at: string
@@ -206,15 +221,13 @@ export const connectsWithTable = {
   }
 }
 
-export const conversesWithTable = {
-  table: 'DEFINE TABLE converses_with SCHEMAFULL TYPE RELATION IN wave OUT canal;',
+export const conversationWithTable = {
+  table: 'DEFINE TABLE conversation_with SCHEMAFULL TYPE RELATION IN wave|bridge OUT connects_with;',
   fields: {
-    bridge: 'DEFINE FIELD bridge ON TABLE converses_with TYPE record<bridge>;',
-    from: 'DEFINE FIELD from ON TABLE converses_with TYPE record<wave|canal>;',
-    reply_to: 'DEFINE FIELD reply_to ON TABLE converses_with TYPE option<record<converses_with>>;',
-    body: 'DEFINE FIELD body ON TABLE converses_with TYPE string ASSERT string::len($value) < 1000;',
-    has_attachment: 'DEFINE FIELD has_attachment ON TABLE converses_with TYPE bool;',
-    attachment: 'DEFINE FIELD attachment ON TABLE converses_with TYPE option<record<cargo>>;',
-    created_at: 'DEFINE FIELD created_at ON TABLE converses_with TYPE datetime DEFAULT time::now() READONLY;'
+    reply_to: 'DEFINE FIELD reply_to ON TABLE conversation_with TYPE option<record<conversation_with>>;',
+    body: 'DEFINE FIELD body ON TABLE conversation_with TYPE string ASSERT string::len($value) < 1000;',
+    has_attachment: 'DEFINE FIELD has_attachment ON TABLE conversation_with TYPE bool;',
+    attachment: 'DEFINE FIELD attachment ON TABLE conversation_with TYPE option<record<cargo>>;',
+    created_at: 'DEFINE FIELD created_at ON TABLE conversation_with TYPE datetime DEFAULT time::now() READONLY;'
   }
 }
