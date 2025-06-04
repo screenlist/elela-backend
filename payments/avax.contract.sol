@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity  ^0.8.29;
+pragma solidity  ^0.8.24;
 
 contract ElelaPayments {
   address payable public owner;
