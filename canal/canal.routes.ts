@@ -750,6 +750,7 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
   if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
 
   const bridge = await db.select<Bridge>(is_connected.out)
+  const wave = await db.select<Wave>(is_connected.in)
   const text = (await db.query<Array<ConversationWith[]>>(surql`SELECT * FROM conversation_with WHERE out = ${is_connected.id} ORDER created_at ASC LIMIT 100;`))[0]
 
   return c.json({
@@ -758,6 +759,8 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
     wave_id: is_connected.in,
     start_time: bridge.start_time,
     end_time: bridge.end_time,
+    intiation_code: bridge.public_code,
+    response_code: wave.public_code,
     messages: text
   })
 })
