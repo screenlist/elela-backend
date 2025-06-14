@@ -400,7 +400,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     }, { message: 'Flare must be exactly two words, each of at least 4 but no more than 15 characters long'}),
     start_time: z.preprocess((arg) => ( typeof arg === 'string' || arg instanceof Date ? new Date(arg) : undefined ), z.date()).refine(val => {
       return val > new Date()
-    }, { message: 'You cannot schedule a bridge to a past date' })
+    }, { message: 'You cannot schedule a bridge to a past date' }).refine(val => val <= new Date( Date.now() + 1000*60*60*24*90 ), {message: 'You cannot schedule a bridge more than 90 days in the future'})
   })
   
   const body = await c.req.json()
@@ -421,7 +421,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(canal.capacity - canal.usage <= 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
   const start = new Date(start_time).valueOf()
-  const end = start + 1000*60*20
+  const end = start + 1000*60*30
   const code = await generateUniqueFlare(flare, 'bridge', 120)
   const bridgeContent = {
     canal: canal.id,
@@ -429,7 +429,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     start_time: new Date(start),
     end_time: new Date(end)
   }
-  const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${billing.calculateSubpointForBridge(20).subpoints};`)
+  const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${billing.calculateSubpointForBridge(30).subpoints};`)
   return c.json(newBridge[0])
 })
 
@@ -759,8 +759,9 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
     wave_id: is_connected.in,
     start_time: bridge.start_time,
     end_time: bridge.end_time,
-    intiation_code: bridge.public_code,
-    response_code: wave.public_code,
+    created_at: bridge.created_at,
+    flare: bridge.public_code,
+    counterflare: wave.public_code,
     messages: text
   })
 })
@@ -870,7 +871,8 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
               })
             })
             break;
-          case 'joined':
+          case 'joined': {
+
             broadcast({
               clients: conversation,
               sender: user_id.toString(),
@@ -884,8 +886,25 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
                 }
               })
             })
+
+            conversation.forEach((_client, id) => {
+              if(id !== user_id.toString()){
+                ws.send(JSON.stringify({
+                  type: 'joined',
+                data: {
+                    from: id,
+                    message: `${id} has joined`,
+                    created_at: now
+                  }
+                }))
+              }
+            })
+
             break;
-          case 'left':
+
+          }
+          case 'left': {
+
             broadcast({
               clients: conversation,
               sender: user_id.toString(),
@@ -900,6 +919,8 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
               })
             })
             break;
+
+          }
         }
 
       } catch (_error) {
@@ -951,6 +972,8 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
       const now = new Date()
       conversation.delete(user_id.toString())
+      conversations.set(meet.id.toString(), conversation)
+      
       broadcast({
         clients: conversation,
         sender: user_id.toString(),
