@@ -969,7 +969,7 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onClose: (_event, _ws) => {
-
+      console.log('Close fires')
       const now = new Date()
       conversation.delete(user_id.toString())
       conversations.set(meet.id.toString(), conversation)
@@ -991,9 +991,10 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onError: (_event, ws) => {
-
+      console.log('Error fires')
       const now = new Date()
       conversation.delete(user_id.toString())
+      conversations.set(meet.id.toString(), conversation)
       ws.close(1002, `You have encountered an error.`)
       broadcast({
         clients: conversation,
