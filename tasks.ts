@@ -12,6 +12,13 @@ export const clean2faSetups = CronJob.from({
 export const cleanUnactivatedCanals = CronJob.from({
   cronTime: '0 * * * * *',
   onTick: async function(){
-    await db.query(surql`DELETE auth WHERE  created_at < time::now();`)
+    await db.query(surql`DELETE canal WHERE passphrase_hash = NONE AND created_at < time::now()-1m;`)
+  },
+})
+
+export const cleanAbandonedPayments = CronJob.from({
+  cronTime: '0 * * * * *',
+  onTick: async function(){
+    await db.query(surql`DELETE payment WHERE success = false AND created_at < time::now()-1d;`)
   },
 })
