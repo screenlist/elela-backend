@@ -25,7 +25,9 @@ export type Canal = {
   usage: number
   capacity: number
   is_premium: boolean
-  passphrase: string
+  identity_code: string
+  passphrase_hash?: string
+  passphrase_salt: string
   auth_secret?: string
   auth_salt?: string
   totp_enabled: boolean
@@ -116,7 +118,9 @@ export const canalTable = {
     usage: 'DEFINE FIELD usage ON TABLE canal TYPE number;',
     capacity: 'DEFINE FIELD capacity ON TABLE canal TYPE number;',
     is_premium: 'DEFINE FIELD is_premium ON TABLE canal TYPE bool;',
-    passphrase: 'DEFINE FIELD passphrase ON TABLE canal TYPE string;',
+    passphrase_hash: 'DEFINE FIELD passphrase_hash ON TABLE canal TYPE option<string>;',
+    passphrase_salt: 'DEFINE FIELD passphrase_salt ON TABLE canal TYPE string;',
+    identity_code: 'DEFINE FIELD identity_code ON TABLE canal TYPE string;',
     totp_enabled: 'DEFINE FIELD totp_enabled ON TABLE canal TYPE bool DEFAULT false;',
     auth_secret: 'DEFINE FIELD auth_secret ON TABLE canal TYPE option<string>;',
     auth_salt: 'DEFINE FIELD auth_salt ON TABLE canal TYPE option<string>;',
