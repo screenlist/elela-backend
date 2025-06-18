@@ -8,3 +8,10 @@ export const clean2faSetups = CronJob.from({
     await db.query(surql`DELETE auth WHERE expires_at < time::now();`)
   },
 })
+
+export const cleanUnactivatedCanals = CronJob.from({
+  cronTime: '0 * * * * *',
+  onTick: async function(){
+    await db.query(surql`DELETE auth WHERE  created_at < time::now();`)
+  },
+})
