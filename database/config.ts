@@ -2,6 +2,7 @@
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
 import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversationWithTable, authTable, sessionTable, visitTable } from '../canal/canal.config.ts'
 import { paymentTable, rateTable } from "../payments/payments.config.ts"
+import { cargoTable, uploadSessionTable } from "../jetsam/jetsam.config.ts"
 
 export const db = await getSurreal()
 
@@ -291,6 +292,54 @@ export async function startUpDatabase(){
         const key = index as keyof typeof visitTable.indices;
         if(presentIndexes.indexOf(key) < 0){
           await db.query(visitTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('cargo') < 0){
+      const schema =  `${cargoTable.table}\n` + Object.values(cargoTable.fields).join('\n') + Object.values(cargoTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const cargo_info = await db.query<any[]>('INFO FOR TABLE cargo;')
+
+      const presentFields = Object.entries(cargo_info[0].fields).map(field => field[0])
+      for(const field in cargoTable.fields){
+        const key = field as keyof typeof cargoTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(cargoTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(cargo_info[0].indexes).map(field => field[0])
+      for(const index in cargoTable.indices){
+        const key = index as keyof typeof cargoTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(cargoTable.indices[key])
+        }
+      }
+    }
+    
+    if(tables.indexOf('upload_session') < 0){
+      const schema =  `${uploadSessionTable.table}\n` + Object.values(uploadSessionTable.fields).join('\n') + Object.values(uploadSessionTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const uploadSession_info = await db.query<any[]>('INFO FOR TABLE upload_session;')
+
+      const presentFields = Object.entries(uploadSession_info[0].fields).map(field => field[0])
+      for(const field in uploadSessionTable.fields){
+        const key = field as keyof typeof uploadSessionTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(uploadSessionTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(uploadSession_info[0].indexes).map(field => field[0])
+      for(const index in uploadSessionTable.indices){
+        const key = index as keyof typeof uploadSessionTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(uploadSessionTable.indices[key])
         }
       }
     }
