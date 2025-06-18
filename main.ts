@@ -6,7 +6,7 @@ import canal from "./canal/canal.routes.ts"
 import payments from "./payments/payments.routes.ts"
 import jetsam from "./jetsam/jetsam.routes.ts"
 import { HTTPException } from "@hono/hono/http-exception"
-import { clean2faSetups } from './tasks.ts'
+import { clean2faSetups, cleanAbandonedPayments, cleanUnactivatedCanals } from './tasks.ts'
 
 const app = new Hono()
 startUpDatabase()
@@ -15,6 +15,8 @@ const client = Deno.env.get('CLIENT_HOST')
 if(!client){ throw new Error('Provide a client host string') }
 
 clean2faSetups.start()
+cleanUnactivatedCanals.start()
+cleanAbandonedPayments.start()
 
 app.use(logger())
 app.use((c, next) => {
