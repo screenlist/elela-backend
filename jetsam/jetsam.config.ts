@@ -69,7 +69,6 @@ export const uploadSessionTable = {
     created_at: 'DEFINE FIELD created_at ON TABLE upload_session TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE upload_session TYPE datetime DEFAULT ALWAYS time::now();',
     uploaded_chunks: 'DEFINE FIELD uploaded_chunks ON TABLE upload_session TYPE array<object> DEFAULT ALWAYS [];',
-    'uploaded_chunks[*]': 'DEFINE FIELD uploaded_chunks[*] ON TABLE upload_session TYPE object;',
     'uploaded_chunks[*].index': 'DEFINE FIELD uploaded_chunks[*].index ON TABLE upload_session TYPE number;',
     'uploaded_chunks[*].iv': 'DEFINE FIELD uploaded_chunks[*].iv ON TABLE upload_session TYPE string;',
     'uploaded_chunks[*].sha1': 'DEFINE FIELD uploaded_chunks[*].sha1 ON TABLE upload_session TYPE string;',
