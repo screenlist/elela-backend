@@ -25,7 +25,7 @@ export type Canal = {
   usage: number
   capacity: number
   is_premium: boolean
-  identity_code: string
+  letter_sequence: string
   passphrase_hash?: string
   passphrase_salt: string
   auth_secret?: string
@@ -120,15 +120,15 @@ export const canalTable = {
     is_premium: 'DEFINE FIELD is_premium ON TABLE canal TYPE bool;',
     passphrase_hash: 'DEFINE FIELD passphrase_hash ON TABLE canal TYPE option<string>;',
     passphrase_salt: 'DEFINE FIELD passphrase_salt ON TABLE canal TYPE string;',
-    identity_code: 'DEFINE FIELD identity_code ON TABLE canal TYPE string;',
+    letter_sequence: 'DEFINE FIELD letter_sequence ON TABLE canal TYPE string;',
     totp_enabled: 'DEFINE FIELD totp_enabled ON TABLE canal TYPE bool DEFAULT false;',
     auth_secret: 'DEFINE FIELD auth_secret ON TABLE canal TYPE option<string>;',
     auth_salt: 'DEFINE FIELD auth_salt ON TABLE canal TYPE option<string>;',
     created_at: 'DEFINE FIELD created_at ON TABLE canal TYPE datetime DEFAULT time::now() READONLY;',
-    updated_at: 'DEFINE FIELD updated_at ON TABLE canal TYPE datetime DEFAULT time::now();'
+    updated_at: 'DEFINE FIELD updated_at ON TABLE canal TYPE datetime DEFAULT ALWAYS time::now();'
   },
   indices: {
-    unique_passphrase: 'DEFINE INDEX unique_passphrase ON TABLE canal FIELDS passphrase UNIQUE;'
+    unique_letter_sequence: 'DEFINE INDEX unique_letter_sequence ON TABLE canal FIELDS letter_sequence UNIQUE;'
   }
 }
 
