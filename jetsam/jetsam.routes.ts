@@ -45,18 +45,17 @@ jetsam.post('/cost', c => {
 
 jetsam.post('/start', async c => {
   if(!endpoint){ throw new HTTPException(400, { message: 'The object storage endpoint was not found' }) }
-  const calcium = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+  const storage_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
     headers: {
       'Authorization': `Basic ${keys()}`
     }
   })
 
-  if(!calcium.ok){
-    console.log(await calcium.json())
-  } else {
-    console.log(await calcium.json())
-  }
+  const storage_auth = await storage_auth_res.json()
+  
+  if(!storage_auth_res.ok){throw new HTTPException(400, { message:  storage_auth.message })}
+
   return c.json({returned: true})
 })
 
