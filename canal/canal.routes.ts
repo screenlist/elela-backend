@@ -9,7 +9,7 @@ import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
 import { db } from '../database/config.ts'
-import { encodeHMAC, verifyHMAC, verifyRequest, hexToBytes, generateUniquePassphrase, generateUniqueFlare, Obfuscator, Billing, broadcast } from '../utilities.ts'
+import { verifyRequest, hexToBytes, generateUniqueFlare, Obfuscator, Billing, broadcast, generateUniqueLetterSequence } from '../utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit, Message, ConversationWith  } from './canal.config.ts';
 import { WSContext } from "@hono/hono/ws";
@@ -60,8 +60,8 @@ canal.get('/generate', async (c) => {
 
   const {ref, sender} = schema.parse({ ref: c.req.query('ref'), sender: c.req.query('sender')})
 
-  const canal = await generateUniquePassphrase(120)
-  const canalHash = await encodeHMAC(canal)
+  const sequence = await generateUniqueLetterSequence()
+  const passphrase_salt = new Obfuscator().generateKey()
 
   if(ref && !sender){
 
@@ -80,10 +80,11 @@ canal.get('/generate', async (c) => {
         usage: 0,
         capacity: payment.points,
         is_premium: true,
-        passphrase: canalHash
+        letter_sequence: sequence,
+        passphrase_salt: passphrase_salt
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
-      return c.json({passphrase: canal, premium: true})
+      return c.json({letter_sequence: sequence, premium: true})
     }
     
   } if(ref && sender){
@@ -103,10 +104,11 @@ canal.get('/generate', async (c) => {
         usage: 0,
         capacity: payment.points,
         is_premium: true,
-        passphrase: canalHash
+        letter_sequence: sequence,
+        passphrase_salt: passphrase_salt
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
-      return c.json({passphrase: canal, premium: true})
+      return c.json({letter_sequence: sequence, premium: true})
     }
   } else {
 
@@ -114,27 +116,75 @@ canal.get('/generate', async (c) => {
       usage: 0,
       capacity: billing.flowpointsToSubpoints(1),
       is_premium: false,
-      passphrase: canalHash
+      letter_sequence: sequence,
+      passphrase_salt: passphrase_salt
     }
     await db.query(surql`CREATE canal CONTENT ${content};`)
-    return c.json({passphrase: canal, premium: false})
+    return c.json({letter_sequence: sequence, premium: false})
 
   }
+})
+
+canal.patch('/activate', async c => {
+  const schema = z.object({
+    sequence: z.string({ message: 'Letter sequence must be a string' }).length(8, 'The letter sequence is not correctly formatted'),
+    passphrase_hash: z.string({ message: 'Provide a hash of your passphrase' })
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({sequence: body.sequence, passphrase_hash: body.passphrase_hash})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.sequence){ formatted.sequence._errors.forEach(val => message += `${val}; `) }
+    if(formatted.passphrase_hash){ formatted.passphrase_hash?._errors.forEach(val => message += `${val};`) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { sequence, passphrase_hash } = validation.data
+
+  const canal = (await db.query<Array<Canal[]>>(surql`SELECT * FROM canal WHERE letter_sequence = ${sequence} AND created_at < time::now()+1m LIMIT 1;`))[0][0]
+
+  if(!canal){ throw new HTTPException(400, { message: 'Action not allowed, canal not found' }) }
+  if(canal.passphrase_hash){ throw new HTTPException(400, { message: 'Action not allowed, passphrase already created' }) }
+
+  await db.query<Array<Canal[]>>(surql`UPDATE type::record(${canal.id}, 'canal') SET passphrase_hash = ${passphrase_hash};`).catch((err) => {
+    throw new HTTPException(400, { message: err.message })
+  })
+
+  return c.json({ status: 'success' })
 })
 
 canal.post('/auth', async c => {
   const encoder = new TextEncoder()
 
-  const data = await c.req.json()
-  const phrase: string = data['phrase']
-  if(!phrase){ throw new HTTPException(404, { message: 'No canal phrase was provided.' }) }
-  const phraseHash = await encodeHMAC(phrase)
-  const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase = ${phraseHash} LIMIT 1;`))[0][0]
+  const schema = z.object({
+    sequence: z.string({ message: 'Provide letter sequence' }).length(8, 'The letter sequence is not correctly formatted'),
+    passphrase_hash: z.string({ message: 'Provide a hash of your passphrase' })
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({sequence: body.sequence, passphrase_hash: body.passphrase_hash})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.sequence){ formatted.sequence._errors.forEach(val => message += `${val}; `) }
+    if(formatted.passphrase_hash){ formatted.passphrase_hash?._errors.forEach(val => message += `${val};`) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { sequence, passphrase_hash } = validation.data
+
+  const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase_hash = ${passphrase_hash} AND letter_sequence = ${sequence} LIMIT 1;`))[0][0]
+
   if(!canal){ throw new HTTPException(400, { message: 'Authentication failed' }) }
-  const isAuthentic = await verifyHMAC(phrase, canal.passphrase)
-  if(isAuthentic === false){ throw new HTTPException(400, { message: 'Authentication failed' }) }
+  
   if(canal.capacity - canal.usage === 0 && canal.is_premium === false){
-    throw new HTTPException(400, { message: 'Maximum usage reached.' })
+    throw new HTTPException(400, { message: 'Maximum usage reached, generate a new canal' })
   }
 
   if(canal.totp_enabled){
