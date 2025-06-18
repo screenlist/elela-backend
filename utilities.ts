@@ -158,6 +158,23 @@ export async function reverseColorToWords(){
   return colorToWords
 }
 
+export function letterSequence(pairs = 3){
+  if(pairs <= 0){ pairs = 1 }
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const pair_array: Array<string> = []
+
+  for (let i = 0; i < pairs; i++){
+    const values = crypto.getRandomValues(new Uint8Array(2))
+    let pair_string = ''
+    for (let i = 0; i < 2; i++) {
+      pair_string += alphabet[values[i] % alphabet.length];
+    }
+    pair_array.push(pair_string)
+  }
+
+  return pair_array.join(':')
+}
+
 export class Billing {
 
   calculateUnitPrice(quantity: number){
@@ -432,6 +449,26 @@ export async function generateUniquePassphrase(maxAttempts: number): Promise<str
       attempts++
     } catch (error) {
       throw new HTTPException(400, { message: 'Could not generate canal passphrase', cause: error })
+    }
+  }
+  
+  throw new HTTPException(400, { message: `Failed to generate canal passphrase after ${attempts} attempts` })
+}
+
+export async function generateUniqueLetterSequence(): Promise<string> {
+  let attempts = 0
+  const maxAttempts = (await db.query<Array<number>>(surql`RETURN count(SELECT * FROM canal);`))[0]+100
+
+  while(attempts < maxAttempts){
+    try {
+      const sequence = letterSequence(3)
+      const matches= (await db.query<[number]>(surql`RETURN count(SELECT * FROM canal WHERE letter_sequence = ${sequence});`))[0]
+      if(matches === 0){
+        return sequence
+      }
+      attempts++
+    } catch (error) {
+      throw new HTTPException(400, { message: 'Could not generate canal letter sequence', cause: error })
     }
   }
   
