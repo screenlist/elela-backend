@@ -639,10 +639,16 @@ canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
   const bridge = await db.select<Bridge>(new RecordId('bridge', id))
   const canal = await db.select<Canal>(new RecordId('canal', id))
   if(bridge.canal.toString() !== new RecordId(user.table, user.id).toString()){ throw new HTTPException(403, { message: 'You are not authorised to access this recource' }) }
+
   const wave = (await db.query<[Wave[]]>(surql`SELECT * FROM wave WHERE public_code = ${counterflare} LIMIT 1;`))[0][0]
-  if(!wave){ throw new HTTPException(400, { message: 'The Wave does not exist' }) }
+  if(!wave){ throw new HTTPException(400, { message: 'The response does not exist' }) }
+
+  const has_requested = (await db.query<Array<number>>(surql`RETURN count(SELECT * FROM requests_to WHERE in = ${wave.id} AND out = ${bridge.id});`))[0]
+  if(has_requested === 0){ throw new HTTPException(400, { message: 'Forbidden connection' }) }
+
   const connects = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE out = ${bridge.id});`))[0]
-  if(connects > 0 && canal.is_premium === false){ throw new HTTPException(400, { message: 'You Canal does not allow the capacity for a Bridge to connect with more than 1 Wave.' }) }
+  if(connects > 0){ throw new HTTPException(400, { message: 'Only one connected response per bridge is allowed' }) }
+  
   await db.query(surql`RELATE ${wave.id}->connects_with->${bridge.id};`)
   if(connects > 1 && canal.capacity - canal.usage > 0){
     await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
