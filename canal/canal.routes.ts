@@ -61,7 +61,7 @@ canal.get('/generate', async (c) => {
   const {ref, sender} = schema.parse({ ref: c.req.query('ref'), sender: c.req.query('sender')})
 
   const sequence = await generateUniqueLetterSequence()
-  const passphrase_salt = new Obfuscator().generateKey()
+  const passphrase_salt = new Obfuscator().generateKey(16)
 
   if(ref && !sender){
 
@@ -84,7 +84,7 @@ canal.get('/generate', async (c) => {
         passphrase_salt: passphrase_salt
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
-      return c.json({letter_sequence: sequence, premium: true})
+      return c.json({letter_sequence: sequence, premium: true, passphrase_salt: passphrase_salt})
     }
     
   } if(ref && sender){
@@ -108,7 +108,7 @@ canal.get('/generate', async (c) => {
         passphrase_salt: passphrase_salt
       }
       await db.query(surql`CREATE canal CONTENT ${content};`)
-      return c.json({letter_sequence: sequence, premium: true})
+      return c.json({letter_sequence: sequence, premium: true, passphrase_salt: passphrase_salt})
     }
   } else {
 
@@ -120,41 +120,73 @@ canal.get('/generate', async (c) => {
       passphrase_salt: passphrase_salt
     }
     await db.query(surql`CREATE canal CONTENT ${content};`)
-    return c.json({letter_sequence: sequence, premium: false})
+    return c.json({letter_sequence: sequence, premium: false, passphrase_salt: passphrase_salt})
 
   }
 })
 
 canal.patch('/activate', async c => {
   const schema = z.object({
-    sequence: z.string({ message: 'Letter sequence must be a string' }).length(8, 'The letter sequence is not correctly formatted'),
-    passphrase_hash: z.string({ message: 'Provide a hash of your passphrase' })
+    sequence: z.string({ message: 'Provide a letter sequence' }).length(8, 'The letter sequence is not correctly formatted'),
+    hash: z.string({ message: 'Provide a hash of your passphrase' })
   })
 
   const body = await c.req.json()
-  const validation = schema.safeParse({sequence: body.sequence, passphrase_hash: body.passphrase_hash})
+  const validation = schema.safeParse({sequence: body.sequence, hash: body.hash})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
     let message: string = ''
     formatted._errors.forEach(val => message += `${val}; `)
     if(formatted.sequence){ formatted.sequence._errors.forEach(val => message += `${val}; `) }
-    if(formatted.passphrase_hash){ formatted.passphrase_hash?._errors.forEach(val => message += `${val};`) }
+    if(formatted.hash){ formatted.hash?._errors.forEach(val => message += `${val};`) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { sequence, passphrase_hash } = validation.data
+  const { sequence, hash } = validation.data
 
   const canal = (await db.query<Array<Canal[]>>(surql`SELECT * FROM canal WHERE letter_sequence = ${sequence} AND created_at < time::now()+1m LIMIT 1;`))[0][0]
 
   if(!canal){ throw new HTTPException(400, { message: 'Action not allowed, canal not found' }) }
   if(canal.passphrase_hash){ throw new HTTPException(400, { message: 'Action not allowed, passphrase already created' }) }
 
-  await db.query<Array<Canal[]>>(surql`UPDATE type::record(${canal.id}, 'canal') SET passphrase_hash = ${passphrase_hash};`).catch((err) => {
+  await db.query<Array<Canal[]>>(surql`UPDATE type::record(${canal.id}, 'canal') SET passphrase_hash = ${hash};`).catch((err) => {
     throw new HTTPException(400, { message: err.message })
   })
 
   return c.json({ status: 'success' })
+})
+
+canal.post('/salt', async c => {
+  const schema = z.object({
+    sequence: z.string({ message: 'Provide letter sequence' }).length(8, 'The letter sequence is not correctly formatted'),
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({sequence: body.sequence})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.sequence){ formatted.sequence._errors.forEach(val => message += `${val}; `) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { sequence } = validation.data
+
+  type CanalSalt = {
+    passphrase_salt: string
+    letter_sequence: string
+  }
+
+  const canal = (await db.query<Array<CanalSalt[]>>(surql`SELECT letter_sequence, passphrase_salt FROM canal WHERE letter_sequence = ${sequence} LIMIT 1;`).catch((err) => {
+    throw new HTTPException(400, { message: err.message })
+  }))[0][0]
+
+  if(!canal){throw new HTTPException(400, { message: 'The letter sequence is wrong' })}
+
+  return c.json(canal)
 })
 
 canal.post('/auth', async c => {
