@@ -2,6 +2,7 @@ import { RecordId } from "@surrealdb/surrealdb";
 
 export type Cargo = {
   id: RecordId<string>
+  canal: RecordId<string>
   b2_file_id: string
   subpoints: number
   downloads_count: number
@@ -15,7 +16,7 @@ export type Cargo = {
   is_independent: boolean
   is_public: boolean
   public_code?: string
-  flookey_active_from: Date
+  flookey_active_from?: Date
   storage_valid_until: Date
   created_at: Date
   updated_at: Date
@@ -37,6 +38,7 @@ export type UploadSession = {
 export const cargoTable = {
   table: 'DEFINE TABLE cargo SCHEMAFULL;',
   fields: {
+    canal: 'DEFINE FIELD canal ON TABLE cargo TYPE record<canal>;',
     b2_file_id: 'DEFINE FIELD b2_file_id ON TABLE cargo TYPE string;',
     subpoints: 'DEFINE FIELD subpoints ON TABLE cargo TYPE number;',
     downloads_count: 'DEFINE FIELD downloads_count ON TABLE cargo TYPE number;',
