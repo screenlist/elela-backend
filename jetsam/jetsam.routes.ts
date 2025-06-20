@@ -1,5 +1,6 @@
 import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
+import { stream } from '@hono/hono/streaming'
 import { RecordId, surql } from "@surrealdb/surrealdb"
 import { db } from "../database/config.ts";
 import { Billing, verifyRequest } from "../utilities.ts"
@@ -10,7 +11,8 @@ import { Canal } from "../canal/canal.config.ts";
 
 const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET_ID')
-const endpoint = Deno.env.get('BB_ENDPOINT')
+const endpoint = Deno.env.get('BB_ENDPOINT_API')
+const file_endpoint = Deno.env.get('BB_ENDPOINT_FILE')
 const keys = () => {
   const id = Deno.env.get('BB_KEY_ID')
   const key = Deno.env.get('BB_KEY')
@@ -33,6 +35,77 @@ const jetsam = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave'
 //     throw new HTTPException(400, { message: 'Could not upload', cause: error })
 //   }
 // })
+
+jetsam.get('/', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true};`).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not fetch the cargo' })
+  }))[0]
+  return c.json(cargo)
+})
+
+jetsam.get('/unfinished', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${false};`).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not fetch the cargo' })
+  }))[0]
+  return c.json(cargo)
+})
+
+jetsam.get('/cargo/:id', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND id = ${new RecordId('cargo', id)} LIMIT 1;`).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not fetch the cargo' })
+  }))[0][0]
+  if(!cargo){ throw new HTTPException(404, { message: 'Cargo not found' }) }
+  return c.json(cargo)
+})
+
+jetsam.get('/cargo/:id/download', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND id = ${new RecordId('cargo', id)} LIMIT 1;`).catch((_err) => {
+    throw new HTTPException(400, { message: 'Could not fetch the cargo' })
+  }))[0][0]
+  if(!cargo){ throw new HTTPException(404, { message: 'Cargo not found' }) }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  const download_auth_res = await fetch(endpoint+'/b2api/v4/b2_get_download_authorization', {
+    method: 'POST',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    },
+    body: JSON.stringify({
+      bucketId: bucket,
+      fileNamePrefix: `${canal.letter_sequence.replace(/[^A-Z]/g, '')}`,
+      validDurationInSeconds: 60*60*3
+    })
+  })
+  const download_auth = await download_auth_res.json()
+  if(!download_auth_res.ok){throw new HTTPException(404, { message:  download_auth.message })}
+
+  const download_url = `https://${file_endpoint}/file/${bucket}/${cargo.original_filename}?Authorization=${download_auth.authorizationToken}`
+
+  return c.redirect(download_url)
+})
+
+jetsam.patch('/cargo/:id', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+})
+
+jetsam.delete('/cargo/:id', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+})
 
 jetsam.post('/cost', c => {
   const size = c.req.query('size')
@@ -91,6 +164,8 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${name}`
+
   const storage_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
     headers: {
@@ -104,7 +179,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
     method: 'POST',
     headers: { 'Authorization': storage_auth.authorizationToken },
     body: JSON.stringify({
-      fileName: name,
+      fileName: file_storage_name,
       contentType: type,
       bucketId: bucket,
       fileInfo: { large_file_sha1: sha1 }
@@ -131,12 +206,13 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   if(!upload_url_two_res.ok && !upload_url_one_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
 
   const cargo_content = {
+    canal: canal.id, 
     b2_file_id: file_id,
     subpoints: costs.total_subpoints,
     downloads_count: 0,
     downloads_total: downloads,
     name: name,
-    original_filename: name,
+    original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,
     size: size,
@@ -183,6 +259,47 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   })
 
   return c.json(information)
+})
+
+jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
+  // const user = c.get('user') DO NOT FOREGT TO MAKE SURE THE USER OWNS THIS SESSION
+  const id = c.req.param('id')
+  const schema = z.object({
+    sha1: z.string({ message: 'Provide the sha1 hash of the chunk' }),
+    size: z.number({ message: 'Provide the chunk size', coerce: true }).min(1, 'Chunk size must be at least 1 byte'),
+    index: z.number({ message: 'Provide index number of this chunk', coerce: true }).min(1, 'A chunk index cannot be smaller than 1').max(10000, 'A chunk index cannot be bigger than 10 000')
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({
+    sha1: body.sha1,
+    size: body.size,
+    index: body.index
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.sha1){ formatted.sha1._errors.forEach(val => message.push(val)) }
+    if(formatted.size){ formatted.size?._errors.forEach(val => message.push(val)) }
+    if(formatted.index){ formatted.index?._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const session = (await db.query<Array<UploadSession[]>>(surql`
+    UPDATE type::record(${new RecordId('upload_session', id)}, 'upload_session') SET uploaded_chunks = ${validation.data};
+  `).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not update upload session' })
+  }))[0][0]
+
+  if(!session){ throw new HTTPException(404, { message: 'This upload session was not found' }) }
+
+
+})
+
+jetsam.post('/finish', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
 })
 
 export default jetsam
