@@ -26,6 +26,7 @@ canal.get('/', verifyRequest(['sailor']), async c => {
   return c.json({
     usage: {
       id: canal.id.id.toString(),
+      letter_sequence: canal.letter_sequence,
       capacity: canal.capacity,
       usage: canal.usage,
       is_premium: canal.is_premium,
@@ -648,7 +649,7 @@ canal.post('/bridges/:id/connect', verifyRequest(['sailor']), async c => {
 
   const connects = (await db.query<[number]>(surql`RETURN count(SELECT * FROM connects_with WHERE out = ${bridge.id});`))[0]
   if(connects > 0){ throw new HTTPException(400, { message: 'Only one connected response per bridge is allowed' }) }
-  
+
   await db.query(surql`RELATE ${wave.id}->connects_with->${bridge.id};`)
   if(connects > 1 && canal.capacity - canal.usage > 0){
     await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage = ${++canal.usage};`)
