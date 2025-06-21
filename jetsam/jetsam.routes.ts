@@ -301,6 +301,44 @@ jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
   })
 })
 
+jetsam.delete('/session/:id', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+
+  const session = (await db.query<Array<UploadSession[]>>(surql`
+    SELECT * FROM upload_session WHERE id = ${new RecordId('upload_session', id)} AND cargo.canal = ${new RecordId('canal', user.id)};
+  `).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not update upload session' })
+  }))[0][0]
+  if(!session){ throw new HTTPException(404, { message: 'This upload session was not found' }) }
+
+  const cargo = await db.select<Cargo>(session.cargo)
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const cancel_file_res = await fetch(endpoint+'/b2api/v4/b2_cancel_large_file', {
+    method: 'POST',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    },
+    body: JSON.stringify({ fileId: cargo.b2_file_id })
+  })
+  const cancel_file = await cancel_file_res.json()
+  if(!cancel_file_res.ok){throw new HTTPException(404, { message:  cancel_file.message })}
+
+  await db.delete(session.id)
+  await db.delete(cargo.id)
+
+  return c.json({status: 'success'})
+})
+
 jetsam.post('/finish', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const schema = z.object({
