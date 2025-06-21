@@ -106,6 +106,35 @@ jetsam.patch('/cargo/:id', verifyRequest(['sailor']), async c => {
 
 jetsam.delete('/cargo/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
+  const id = c.req.param('id')
+
+  const cargo = (await db.query<Array<Cargo[]>>(surql`
+    SELECT * FROM cargo WHERE id = ${new RecordId('cargo', id)} AND canal = ${new RecordId('canal', user.id)};
+  `))[0][0]
+
+  if(!cargo){ throw new HTTPException(404, { message:  'Cargo is not found' }) }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const delete_file_res = await fetch(endpoint+'/b2api/v4/b2_delete_file_version', {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  const delete_file = await delete_file_res.json()
+  if(!delete_file_res.ok){throw new HTTPException(404, { message:  delete_file.message })}
+
+  await db.delete(cargo.id)
+
+  return c.json({ status: 'success' })
 })
 
 jetsam.post('/cost', c => {
