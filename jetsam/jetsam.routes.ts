@@ -5,6 +5,7 @@ import { RecordId, surql } from "@surrealdb/surrealdb"
 import { db } from "../database/config.ts";
 import { Billing, verifyRequest } from "../utilities.ts"
 import { encodeBase64 } from "@std/encoding"
+import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
 import { Cargo, UploadSession } from "./jetsam.config.ts";
 import { Canal } from "../canal/canal.config.ts";
@@ -262,7 +263,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
 })
 
 jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
-  // const user = c.get('user') DO NOT FOREGT TO MAKE SURE THE USER OWNS THIS SESSION
+  const user = c.get('user')
   const id = c.req.param('id')
   const schema = z.object({
     sha1: z.string({ message: 'Provide the sha1 hash of the chunk' }),
@@ -288,18 +289,80 @@ jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
   }
 
   const session = (await db.query<Array<UploadSession[]>>(surql`
-    UPDATE type::record(${new RecordId('upload_session', id)}, 'upload_session') SET uploaded_chunks = ${validation.data};
+    UPDATE upload_session SET uploaded_chunks += ${validation.data} WHERE id = ${new RecordId('upload_session', id)} AND cargo.canal = ${new RecordId('canal', user.id)};
   `).catch((_err) => {
     throw new HTTPException(404, { message: 'Could not update upload session' })
   }))[0][0]
 
   if(!session){ throw new HTTPException(404, { message: 'This upload session was not found' }) }
 
-
+  return c.json({
+    percentage_completion: Math.floor( ( session.uploaded_chunks.length / session.total_chunks ) * 100 )
+  })
 })
 
 jetsam.post('/finish', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
+  const schema = z.object({
+    file_id: z.string({ message: 'Provide the file id' }),
+    session_id: z.string({ message: 'Provide the session id'}),
+    hashes: z.string({ message: 'Provide the SHA1 hashes of the chunks' }).array().min(2, 'Must at least have 2 chunk hashes').max(10000, 'Cannot have more than 10 000 chunk hashes')
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({
+    file_id: body.file_id,
+    session_id: body.session_id,
+    hashes: body.hashes
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.file_id){ formatted.file_id._errors.forEach(val => message.push(val)) }
+    if(formatted.session_id){ formatted.session_id?._errors.forEach(val => message.push(val)) }
+    if(formatted.hashes){ formatted.hashes?._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const { file_id, session_id, hashes } = validation.data
+
+  const session = (await db.query<Array<UploadSession[]>>(surql`
+    SELECT * FROM upload_session WHERE id = ${new RecordId('upload_session', session_id)} AND cargo.canal = ${new RecordId('canal', user.id)};
+  `))[0][0]
+
+  if(!session){ throw new HTTPException(400, { message: 'File upload session was not found' }) }
+  if(session.total_chunks !== session.uploaded_chunks.length){ throw new HTTPException(400, { message: 'The file upload is not complete' }) }
+  if(session.total_chunks !== hashes.length){ throw new HTTPException(400, { message: 'The provided hashes are either small or larger than expected' }) }
+  const stored_hashes = session.uploaded_chunks.map(chunk => chunk.sha1)
+  if(!equal(hashes, stored_hashes)){ throw new HTTPException(400, { message: 'The provided hash does not match' }) }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const finish_file_res = await fetch(endpoint+'/b2api/v4/b2_finish_large_file', {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    },
+    body: JSON.stringify({
+      fileId: file_id,
+      partSha1Array: hashes
+    })
+  })
+  const finish_file = await finish_file_res.json()
+  if(!finish_file_res.ok){throw new HTTPException(404, { message:  finish_file.message })}
+  
+  const cargo = (await db.query<Array<Cargo[]>>(surql`UPDATE type::record(${session.cargo.toString()}, 'cargo') SET is_complete = ${true};`))[0][0]
+
+  return c.json(cargo)
 })
 
 export default jetsam
