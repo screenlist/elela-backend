@@ -102,6 +102,27 @@ jetsam.get('/cargo/:id/download', verifyRequest(['sailor']), async c => {
 
 jetsam.patch('/cargo/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
+  const id = c.req.param('id')
+  const schema = z.string({ message: 'Provide the name' })
+  const body = await c.req.json()
+  const validation = schema.safeParse(body.name)
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const cargo = (await db.query<Array<UploadSession[]>>(surql`
+    UPDATE cargo SET name = ${validation.data} WHERE id = ${new RecordId('upload_session', id)} AND canal = ${new RecordId('canal', user.id)};
+  `).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not update cargo' })
+  }))[0][0]
+
+  if(!cargo){ throw new HTTPException(404, { message: 'Cargo not found' }) }
+
+  return c.json(cargo)
 })
 
 jetsam.delete('/cargo/:id', verifyRequest(['sailor']), async c => {
