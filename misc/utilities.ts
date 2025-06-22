@@ -85,7 +85,7 @@ export async function verifyHMAC(message: string, encoded_hmac: string) {
 }
 
 export async function diceware(length: number): Promise<string[]> {
-  const wordstext = await Deno.readTextFile('./wordlist.json')
+  const wordstext = await Deno.readTextFile('./misc/wordlist.json')
   const words = JSON.parse(wordstext)
   const set: string[] = []
 
@@ -106,7 +106,7 @@ export async function diceware(length: number): Promise<string[]> {
 }
 
 export async function emojiware(length: number){
-  const emojitext = await Deno.readTextFile('./emojilist.json')
+  const emojitext = await Deno.readTextFile('./misc/emojilist.json')
   const emojiObject: {[key: string]: {
     name: string
     slug: string
@@ -128,9 +128,9 @@ export async function emojiware(length: number){
 }
 
 export async function generateWordColorMap(){
-  const wordstext = await Deno.readTextFile('./wordlist.json')
+  const wordstext = await Deno.readTextFile('./misc/wordlist.json')
   const wordsObject: {[key: string]: string} = JSON.parse(wordstext)
-  const colorstext = await Deno.readTextFile('./colorlist.json')
+  const colorstext = await Deno.readTextFile('./misc/colorlist.json')
   const colorsObject: {[key: string]: string} = JSON.parse(colorstext)
   const words = Object.values(wordsObject)
   const colors = Object.values(colorsObject)
