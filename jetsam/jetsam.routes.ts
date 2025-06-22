@@ -1,14 +1,14 @@
 import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
 import { stream } from '@hono/hono/streaming'
-import { RecordId, surql } from "@surrealdb/surrealdb"
+import { PreparedQuery, RecordId, surql } from "@surrealdb/surrealdb"
 import { db } from "../database/config.ts";
 import { Billing, verifyRequest } from "../utilities.ts"
 import { encodeBase64 } from "@std/encoding"
 import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
 import { Cargo, UploadSession } from "./jetsam.config.ts";
-import { Canal } from "../canal/canal.config.ts";
+import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
 
 const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET_ID')
@@ -22,20 +22,6 @@ const keys = () => {
   return encodeBase64(`${id}:${key}`)
 }
 const jetsam = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave', session: string}} }>()
-
-// jetsam.post('/bridge', async c => {
-//   try {
-//     const name = crypto.randomUUID()
-//     const body = await c.req.formData()
-//     const file = body.get('pic') as File
-
-//     const url = Deno.env.get('APP_ENV') === 'production' ? `https://${Deno.env.get('HOST')}/jetsam/bridge/${name}` : `https://f003.backblazeb2.com/file/${bucket}/${name}`
-//     return c.json({url})
-//   } catch (error) {
-//     console.log(error)
-//     throw new HTTPException(400, { message: 'Could not upload', cause: error })
-//   }
-// })
 
 jetsam.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
@@ -436,7 +422,7 @@ jetsam.post('/finish', verifyRequest(['sailor']), async c => {
   if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
 
   const finish_file_res = await fetch(endpoint+'/b2api/v4/b2_finish_large_file', {
-    method: 'GET',
+    method: 'POST',
     headers: {
       'Authorization': storage_account_auth.authorizationToken
     },
@@ -451,6 +437,229 @@ jetsam.post('/finish', verifyRequest(['sailor']), async c => {
   const cargo = (await db.query<Array<Cargo[]>>(surql`UPDATE type::record(${session.cargo.toString()}, 'cargo') SET is_complete = ${true};`))[0][0]
 
   return c.json(cargo)
+})
+
+jetsam.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
+  const user = c.get('user')
+  const connection_id = c.req.param('id')
+  const cargo_id = c.req.query('cargo')
+
+  if(!cargo_id){ throw new HTTPException(400, { message: 'Provide the cargo id' }) }
+
+  let query: PreparedQuery
+  switch(user.table){
+    case 'canal':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', connection_id)} AND out.canal = ${new RecordId('canal', user.id)};`
+      break;
+    case 'wave':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', connection_id)} AND in = ${new RecordId('wave', user.id)};`
+      break;
+  }
+
+  const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
+  if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
+
+  const [cargo] = await db.query<Array<Cargo>>(surql`SELECT * FROM ONLY cargo WHERE id = ${cargo_id} AND bridge = ${is_connected.out} LIMIT 1;`)
+  if(!cargo){ throw new HTTPException(400, { message: 'Cargo not found' }) }
+  if(cargo.downloads_count >= cargo.downloads_total){ throw new HTTPException(400, { message: 'You have reached the maximum downloads on this cargo' }) }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const file_res = await fetch(`${endpoint}/b2api/v4/b2_download_file_by_id?fileId=${cargo.b2_file_id}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  if(!file_res.ok){
+    const error = await file_res.json()
+    throw new HTTPException(404, { message:  error.message })
+  }
+
+  c.header('Content-Disposition', 'inline')
+  c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
+  return stream(c, async stream => {
+    stream.onAbort(() => {  })
+    if(file_res.body){
+      await stream.pipe(file_res.body)
+    } else {
+      stream.abort()
+    }
+  })
+})
+
+jetsam.post('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const storage_limit = ( 20 * (1024 ** 2) )
+
+  let query: PreparedQuery
+  switch(user.table){
+    case 'canal':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND out.canal = ${new RecordId('canal', user.id)};`
+      break;
+    case 'wave':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND in = ${new RecordId('wave', user.id)};`
+      break;
+  }
+
+  const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
+  if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
+
+  const [canal, total_storage, bridge] = (await db.query<[Canal, number, Bridge]>(
+    surql`
+      SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${is_connected.out} LIMIT 1;
+      RETURN math::sum(SELECT VALUE size FROM cargo WHERE bridge = ${is_connected.out});
+      SELECT * FROM ONLY bridge WHERE id = ${is_connected.out} LIMIT 1;
+    `
+  ))
+
+  if(bridge.start_time > new Date()){ throw new HTTPException(403, { message: 'The connection is not active yet' }) }
+  if(bridge.end_time < new Date()){ throw new HTTPException(403, { message: 'The connection is not longer active' }) }
+
+  if(!canal.is_premium && total_storage >= storage_limit){ throw new HTTPException(400, { message: 'You have reached your free storage limit' }) }
+
+  const schema = z.object({
+    sha1: z.string({ message: 'Provide a SHA1 hash of the cargo' }),
+    type: z.string({ message: 'Provide the content type of the cargo' }),
+    name: z.string({ message: 'Provide the cargo name' }),
+    size: z.number({ message: 'Provide the cargo size', coerce: true }).min(1, 'Cargo size must be at least 1 byte').max(5*1024*2024, 'Cannot upload cargo bigger than 5MB')
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({
+    sha1: body.sha1, 
+    type: body.type, 
+    name: body.name,
+    size: body.size
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.sha1){ formatted.sha1._errors.forEach(val => message.push(val)) }
+    if(formatted.type){ formatted.type._errors.forEach(val => message.push(val)) }
+    if(formatted.name){ formatted.name?._errors.forEach(val => message.push(val)) }
+    if(formatted.size){ formatted.size?._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_url?bucketId=${bucket}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  const upload_url = await upload_url_res.json()
+  if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
+
+  const { name, sha1, type, size } = validation.data
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${name}`
+
+  const cargo_content = {
+    canal: canal.id, 
+    bridge: is_connected.out,
+    subpoints: 0,
+    downloads_count: 0,
+    downloads_total: 1,
+    name: name,
+    original_filename: file_storage_name,
+    content_type: type,
+    sha1: sha1,
+    size: size,
+    is_complete: false,
+    is_independent: false,
+    is_public: false,
+    storage_valid_until: bridge.end_time
+  }
+
+  const cargo = (await db.query<Array<Cargo>>(surql`CREATE ONLY cargo CONTENT ${cargo_content};`))[0]
+
+  return c.json({
+    id: cargo.id.id.toString(),
+    url: upload_url.uploadUrl,
+    token: upload_url.authorizationToken,
+    name: file_storage_name,
+    sha1: cargo.sha1,
+    size: cargo.size,
+    type: cargo.content_type
+  })
+})
+
+jetsam.patch('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
+  const user = c.get('user')
+  const connection_id = c.req.param('id')
+  const cargo_id = c.req.query('cargo')
+
+  if(!cargo_id){ throw new HTTPException(400, { message: 'Provide the cargo id' }) }
+
+  let query: PreparedQuery
+  switch(user.table){
+    case 'canal':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', connection_id)} AND out.canal = ${new RecordId('canal', user.id)};`
+      break;
+    case 'wave':
+      query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', connection_id)} AND in = ${new RecordId('wave', user.id)};`
+      break;
+  }
+
+  const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
+  if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
+
+  const schema = z.object({
+    file_id: z.string({ message: 'Provide the cargo file id' })
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({ file_id: body.file_id })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.file_id){ formatted.file_id._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_file_info?fileId=${validation.data.file_id}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  const upload_url = await upload_url_res.json()
+  if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
+
+  const cargo = (await db.query<Array<Cargo>>(surql`UPDATE ONLY cargo SET is_complete = ${true}, b2_file_id = ${validation.data.file_id} WHERE id = ${new RecordId('cargo', cargo_id)} AND bridge = ${is_connected.out} AND is_complete = ${false};`))[0]
+  if(!cargo){ throw new HTTPException(404, { message:  'Cargo not found' }) }
+
+  return c.json({id: cargo.id})
 })
 
 export default jetsam
