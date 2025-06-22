@@ -8,7 +8,7 @@ import { encodeBase64 } from "@std/encoding"
 import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
 import { Cargo, UploadSession } from "./jetsam.config.ts";
-import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
+import { Bridge, Canal, ConnectsWith } from "../src/canal/canal.config.ts";
 
 const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET_ID')
@@ -227,20 +227,14 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
 
   const file_id = start_file.fileId
 
-  const upload_url_one_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
     method: 'GET',
     headers: { 'Authorization': storage_auth.authorizationToken }
   })
 
-  const upload_url_two_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
-    method: 'GET',
-    headers: { 'Authorization': storage_auth.authorizationToken }
-  })
+  const upload_url = await upload_url_res.json()
 
-  const upload_url_one = await upload_url_one_res.json()
-  const upload_url_two = await upload_url_two_res.json()
-
-  if(!upload_url_two_res.ok && !upload_url_one_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
+  if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
 
   const cargo_content = {
     canal: canal.id, 
@@ -275,21 +269,17 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
     id: string
     file_id: string
     session_id: string
-    links: {
-      url: string,
-      token: string
-    }[]
+    url: string,
+    token: string
   }
 
   const information: Information = {
     id: cargo.id.id.toString(),
     file_id: file_id,
     session_id: session.id.id.toString(),
-    links: []
+    url: upload_url.url,
+    token: upload_url.authorizationToken
   }
-
-  if(upload_url_one_res.ok){ information.links.push({ url: upload_url_one.uploadUrl, token: upload_url_one.authorizationToken }) }
-  if(upload_url_two_res.ok){ information.links.push({ url: upload_url_two.uploadUrl, token: upload_url_two.authorizationToken }) }
 
   await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
     throw new HTTPException(400, { message: 'Error updating usage' })
