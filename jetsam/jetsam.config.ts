@@ -3,7 +3,8 @@ import { RecordId } from "@surrealdb/surrealdb";
 export type Cargo = {
   id: RecordId<string>
   canal: RecordId<string>
-  b2_file_id: string
+  bridge?: RecordId<string>
+  b2_file_id?: string
   subpoints: number
   downloads_count: number
   downloads_total: number
@@ -39,7 +40,8 @@ export const cargoTable = {
   table: 'DEFINE TABLE cargo SCHEMAFULL;',
   fields: {
     canal: 'DEFINE FIELD canal ON TABLE cargo TYPE record<canal>;',
-    b2_file_id: 'DEFINE FIELD b2_file_id ON TABLE cargo TYPE string;',
+    bridge: 'DEFINE FIELD bridge ON TABLE cargo TYPE option<record<bridge>>;',
+    b2_file_id: 'DEFINE FIELD b2_file_id ON TABLE cargo TYPE option<string>;',
     subpoints: 'DEFINE FIELD subpoints ON TABLE cargo TYPE number;',
     downloads_count: 'DEFINE FIELD downloads_count ON TABLE cargo TYPE number;',
     downloads_total: 'DEFINE FIELD downloads_total ON TABLE cargo TYPE number;',
