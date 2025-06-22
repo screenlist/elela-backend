@@ -2,13 +2,13 @@ import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
 import { stream } from '@hono/hono/streaming'
 import { PreparedQuery, RecordId, surql } from "@surrealdb/surrealdb"
-import { db } from "../database/config.ts";
-import { Billing, verifyRequest } from "../utilities.ts"
+import { db } from "../../database/config.ts";
+import { Billing, verifyRequest } from "../../misc/utilities.ts"
 import { encodeBase64 } from "@std/encoding"
 import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
 import { Cargo, UploadSession } from "./jetsam.config.ts";
-import { Bridge, Canal, ConnectsWith } from "../src/canal/canal.config.ts";
+import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
 
 const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET_ID')

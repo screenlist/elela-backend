@@ -1,8 +1,8 @@
 import { Hono } from '@hono/hono'
 import { HTTPException } from '@hono/hono/http-exception'
 import { RecordId, surql } from '@surrealdb/surrealdb'
-import { db } from '../database/config.ts'
-import { Billing } from '../utilities.ts'
+import { db } from '../../database/config.ts'
+import { Billing } from '../../misc/utilities.ts'
 import { z }  from 'zod'
 import { Canal } from "../canal/canal.config.ts";
 import { PaymentContent } from "./payments.config.ts"

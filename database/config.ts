@@ -1,8 +1,8 @@
 // deno-lint-ignore-file no-explicit-any
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
-import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversationWithTable, authTable, sessionTable, visitTable } from '../canal/canal.config.ts'
-import { paymentTable, rateTable } from "../payments/payments.config.ts"
-import { cargoTable, uploadSessionTable } from "../jetsam/jetsam.config.ts"
+import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversationWithTable, authTable, sessionTable, visitTable } from '../routes/canal/canal.config.ts'
+import { paymentTable, rateTable } from "../routes/payments/payments.config.ts"
+import { cargoTable, uploadSessionTable } from "../routes/jetsam/jetsam.config.ts"
 
 export const db = await getSurreal()
 

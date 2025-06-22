@@ -2,13 +2,13 @@ import { JWTPayload, jwtVerify } from '@panva/jose'
 import { Context, Next } from "@hono/hono";
 import { HTTPException } from "@hono/hono/http-exception";
 import { getCookie } from '@hono/hono/cookie'
-import { db } from "./database/config.ts";
+import { db } from "../database/config.ts";
 import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
 import { encodeHex, decodeHex } from '@std/encoding'
-import { CoinAPIResponse, Rate } from "./payments/payments.config.ts";
-import { Session, Visit } from "./canal/canal.config.ts";
-import { Broadcaster } from './canal/canal.config.ts'
+import { CoinAPIResponse, Rate } from "../routes/payments/payments.config.ts";
+import { Session, Visit } from "../routes/canal/canal.config.ts";
+import { Broadcaster } from '../routes/canal/canal.config.ts'
 
 async function _sortHexColorsFromBlackToWhite(path: string){
   const colorstext = await Deno.readTextFile(path)

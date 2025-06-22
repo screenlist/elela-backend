@@ -2,11 +2,11 @@ import { Hono } from '@hono/hono'
 import { logger } from '@hono/hono/logger'
 import { cors } from '@hono/hono/cors'
 import { startUpDatabase } from "./database/config.ts"
-import canal from "./canal/canal.routes.ts"
-import payments from "./payments/payments.routes.ts"
-import jetsam from "./jetsam/jetsam.routes.ts"
+import canal from "./routes/canal/canal.routes.ts"
+import payments from "./routes/payments/payments.routes.ts"
+import jetsam from "./routes/jetsam/jetsam.routes.ts"
 import { HTTPException } from "@hono/hono/http-exception"
-import { clean2faSetups, cleanAbandonedPayments, cleanUnactivatedCanals } from './tasks.ts'
+import { clean2faSetups, cleanAbandonedPayments, cleanUnactivatedCanals } from './misc/tasks.ts'
 
 const app = new Hono()
 startUpDatabase()

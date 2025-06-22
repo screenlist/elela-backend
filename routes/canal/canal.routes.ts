@@ -8,8 +8,8 @@ import { timingSafeEqual } from 'node:crypto'
 import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
-import { db } from '../database/config.ts'
-import { verifyRequest, hexToBytes, generateUniqueFlare, Obfuscator, Billing, broadcast, generateUniqueLetterSequence } from '../utilities.ts'
+import { db } from '../../database/config.ts'
+import { verifyRequest, hexToBytes, generateUniqueFlare, Obfuscator, Billing, broadcast, generateUniqueLetterSequence } from '../../misc/utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit, Message, ConversationWith  } from './canal.config.ts';
 import { WSContext } from "@hono/hono/ws";

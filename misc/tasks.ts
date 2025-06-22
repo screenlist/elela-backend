@@ -1,5 +1,5 @@
 import { CronJob } from 'cron'
-import { db } from "./database/config.ts";
+import { db } from "../database/config.ts";
 import { surql } from "@surrealdb/surrealdb";
 
 export const clean2faSetups = CronJob.from({
