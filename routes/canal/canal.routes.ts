@@ -841,6 +841,7 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
   const bridge = await db.select<Bridge>(is_connected.out)
   const wave = await db.select<Wave>(is_connected.in)
   const text = (await db.query<Array<ConversationWith[]>>(surql`SELECT * FROM conversation_with WHERE out = ${is_connected.id} ORDER created_at ASC LIMIT 100;`))[0]
+  const [canal] = await db.query<Array<Canal>>(surql`SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${bridge.id} AND canal = ${bridge.canal};`)
 
   return c.json({
     connection_id: is_connected.id,
@@ -851,6 +852,7 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
     created_at: bridge.created_at,
     flare: bridge.public_code,
     counterflare: wave.public_code,
+    is_premium: canal.is_premium,
     messages: text
   })
 })
