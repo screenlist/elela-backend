@@ -13,6 +13,7 @@ export interface Message {
   type: 'text' | 'error' | 'joined' | 'left' | 'typing' | 'text_sent'
   data: {
     message: string
+    cargo?: string
   }
 }
 

@@ -911,10 +911,17 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
         switch(msg.type){
           case 'text': {
 
-            const content = {
-              body: msg.data.message,
-              has_attachment: false
+            interface Content {
+              body: string
+              has_attachment: boolean
+              attachment?: RecordId<string>
             }
+            const content: Content = {
+              body: msg.data.message,
+              has_attachment: msg.data.cargo ? true : false
+            }
+
+            if(msg.data.cargo){ content.attachment = new RecordId('cargo', msg.data.cargo) }
 
             const saved = (await db.query<Array<ConversationWith[]>>(surql`
               RELATE ${user_id}->conversation_with->${meet.id} CONTENT ${content};
