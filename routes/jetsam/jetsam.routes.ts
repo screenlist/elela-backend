@@ -649,7 +649,7 @@ jetsam.patch('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c =
   const cargo = (await db.query<Array<Cargo>>(surql`UPDATE ONLY cargo SET is_complete = ${true}, b2_file_id = ${validation.data.file_id} WHERE id = ${new RecordId('cargo', cargo_id)} AND bridge = ${is_connected.out} AND is_complete = ${false};`))[0]
   if(!cargo){ throw new HTTPException(404, { message:  'Cargo not found' }) }
 
-  return c.json({id: cargo.id})
+  return c.json({id: cargo.id.id.toString()})
 })
 
 export default jetsam
