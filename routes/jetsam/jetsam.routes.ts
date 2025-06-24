@@ -10,14 +10,13 @@ import { z }  from 'zod'
 import { Cargo, UploadSession } from "./jetsam.config.ts";
 import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
 
-const billing = new Billing()
 const bucket = Deno.env.get('BB_BUCKET_ID')
 const endpoint = Deno.env.get('BB_ENDPOINT_API')
 const file_endpoint = Deno.env.get('BB_ENDPOINT_FILE')
 const keys = () => {
   const id = Deno.env.get('BB_KEY_ID')
   const key = Deno.env.get('BB_KEY')
-  if(!id || !key){ throw new HTTPException(400, { message: 'The object storage cannot be reached' }) }
+  if(!id || !key){ throw new Error('The object storage cannot be reached') } 
 
   return encodeBase64(`${id}:${key}`)
 }
@@ -153,7 +152,7 @@ jetsam.post('/cost', c => {
 
   if(typeof Number(size) !== 'number'){ throw new HTTPException(404, { message: 'File size must be a number' }) }
 
-  return c.json(billing.calculateSubpointForCargo(+size, downloads, retention))
+  return c.json(new Billing().calculateSubpointForCargo(+size, downloads, retention))
 })
 
 jetsam.post('/start', verifyRequest(['sailor']), async c => {
@@ -197,7 +196,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
 
   const { sha1, name, type, size, downloads, retention, chunks } = validation.data
 
-  const costs = billing.calculateSubpointForCargo(size, downloads, retention)
+  const costs = new Billing().calculateSubpointForCargo(size, downloads, retention)
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
