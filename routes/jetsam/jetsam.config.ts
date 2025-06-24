@@ -36,6 +36,13 @@ export type UploadSession = {
   updated_at: Date
 }
 
+export type OpenedBy = {
+  id: RecordId<string>
+  in: RecordId<string> // Cargo
+  out: RecordId<string> // Wave || Canal
+  created_at: string
+}
+
 export const cargoTable = {
   table: 'DEFINE TABLE cargo SCHEMAFULL;',
   fields: {
@@ -80,4 +87,12 @@ export const uploadSessionTable = {
     unique_cargo: 'DEFINE INDEX unique_cargo ON TABLE upload_session FIELDS cargo UNIQUE;',
     unique_uploaded_chunks_index: 'DEFINE INDEX unique_uploaded_chunks_index ON TABLE upload_session FIELDS uploaded_chunks[*].index UNIQUE;'
   }
+}
+
+export const openedByTable = {
+  table: 'DEFINE TABLE opened_by SCHEMAFULL TYPE RELATION IN cargo OUT wave|canal;',
+  fields: {
+    created_at: 'DEFINE FIELD created_at ON TABLE opened_by TYPE datetime DEFAULT time::now() READONLY;'
+  },
+  indices: {}
 }

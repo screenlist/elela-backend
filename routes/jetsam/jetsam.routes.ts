@@ -449,8 +449,12 @@ jetsam.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => 
   const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
   if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
 
-  const [cargo] = await db.query<Array<Cargo>>(surql`SELECT * FROM ONLY cargo WHERE id = ${cargo_id} AND bridge = ${is_connected.out} LIMIT 1;`)
+  const [cargo, opened] = await db.query<[Cargo, number]>(surql`
+    SELECT * FROM ONLY cargo WHERE id = ${new RecordId('cargo', cargo_id)} AND bridge = ${is_connected.out} LIMIT 1;
+    RETURN count(SELECT * FROM opened_by WHERE in = ${new RecordId('cargo', cargo_id)} AND out = ${new RecordId(user.table, user.id)});
+  `)
   if(!cargo){ throw new HTTPException(400, { message: 'Cargo not found' }) }
+  if(opened > 0){ throw new HTTPException(400, { message: 'You have already opened this image' }) }
   if(cargo.downloads_count >= cargo.downloads_total){ throw new HTTPException(400, { message: 'You have reached the maximum downloads on this cargo' }) }
 
   const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
@@ -472,7 +476,8 @@ jetsam.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => 
     const error = await file_res.json()
     throw new HTTPException(404, { message:  error.message })
   }
-
+  await db.query(surql`RELATE ${cargo.id}->opened_by->${new RecordId(user.table, user.id)};`)
+  
   c.header('Content-Disposition', 'inline')
   c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
   return stream(c, async stream => {
@@ -563,13 +568,13 @@ jetsam.post('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c =>
   const { name, sha1, type, size } = validation.data
   const clean_name = await sanitizeFilename(name)
   const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
-  console.log(file_storage_name)
+
   const cargo_content = {
     canal: canal.id, 
     bridge: is_connected.out,
     subpoints: 0,
     downloads_count: 0,
-    downloads_total: 1,
+    downloads_total: 2,
     name: clean_name,
     original_filename: file_storage_name,
     content_type: type,
