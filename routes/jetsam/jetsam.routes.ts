@@ -3,7 +3,7 @@ import { HTTPException } from '@hono/hono/http-exception'
 import { stream } from '@hono/hono/streaming'
 import { PreparedQuery, RecordId, surql } from "@surrealdb/surrealdb"
 import { db } from "../../database/config.ts";
-import { Billing, verifyRequest } from "../../misc/utilities.ts"
+import { Billing, sanitizeFilename, verifyRequest } from "../../misc/utilities.ts"
 import { encodeBase64 } from "@std/encoding"
 import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
@@ -200,7 +200,8 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
-  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${name}`
+  const clean_name = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
 
   const storage_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
@@ -241,7 +242,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
     subpoints: costs.total_subpoints,
     downloads_count: 0,
     downloads_total: downloads,
-    name: name,
+    name: clean_name,
     original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,
@@ -497,7 +498,7 @@ jetsam.post('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c =>
     case 'wave':
       query = surql`SELECT * FROM connects_with WHERE id = ${new RecordId('connects_with', id)} AND in = ${new RecordId('wave', user.id)};`
       break;
-  }
+  } 
 
   const is_connected = (await db.query<Array<ConnectsWith[]>>(query))[0][0]
   if(!is_connected){ throw new HTTPException(403, { message: 'Connection not found' }) }
@@ -560,15 +561,16 @@ jetsam.post('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c =>
   if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
 
   const { name, sha1, type, size } = validation.data
-  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${name}`
-
+  const clean_name = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+  console.log(file_storage_name)
   const cargo_content = {
     canal: canal.id, 
     bridge: is_connected.out,
     subpoints: 0,
     downloads_count: 0,
     downloads_total: 1,
-    name: name,
+    name: clean_name,
     original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,

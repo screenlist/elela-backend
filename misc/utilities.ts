@@ -92,7 +92,7 @@ export async function diceware(length: number): Promise<string[]> {
   while(set.length < length){
     const charset = '123456'
     let dice = ''
-    const randomValues = crypto.getRandomValues(new Uint8Array(length))
+    const randomValues = crypto.getRandomValues(new Uint8Array(5))
     for(let i = 0; i < 5; i++){
       dice += charset[randomValues[i]% charset.length] 
     }
@@ -652,4 +652,19 @@ export async function setUpStorage(){
   } else {
     console.log('Storage already rules configured.')
   }
+}
+
+export async function sanitizeFilename(filename: string): Promise<string> {
+  const lastDotIndex = filename.lastIndexOf('.')
+  let name = filename
+  let extension = ''
+
+  if (lastDotIndex !== -1) {
+    name = filename.substring(0, lastDotIndex)
+    extension = filename.substring(lastDotIndex)
+  }
+  const random_word = await diceware(1)
+  const sanitizedName = name.replace(/[^a-zA-Z0-9]/g, '_')+`_${random_word.toString()}`
+
+  return sanitizedName + extension
 }
