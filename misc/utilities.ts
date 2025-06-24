@@ -415,7 +415,7 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
       if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
       const session = await db.select<Session>(new RecordId('session', payload.sid))
       if(Date.now() > new Date(session.expires_at).valueOf()){ throw new HTTPException(401, { message: 'Your session has expired' }) }
-      const newExpiry = new Date( Date.now() + 1000*60*30 )
+      const newExpiry = new Date( Date.now() + 1000*60*45 )
       await db.query(surql`UPDATE type::record(${session.id.toString()}) SET expires_at = ${newExpiry};`)
     }
 
