@@ -7,9 +7,11 @@ import payments from "./routes/payments/payments.routes.ts"
 import jetsam from "./routes/jetsam/jetsam.routes.ts"
 import { HTTPException } from "@hono/hono/http-exception"
 import { clean2faSetups, cleanAbandonedPayments, cleanUnactivatedCanals } from './misc/tasks.ts'
+import { setUpStorage } from "./misc/utilities.ts";
 
 const app = new Hono()
 startUpDatabase()
+setUpStorage()
 
 const client = Deno.env.get('CLIENT_HOST')
 if(!client){ throw new Error('Provide a client host string') }
@@ -24,7 +26,8 @@ app.use((c, next) => {
     return next()
   } else {
     const corsHandler = cors({
-      origin: client
+      origin: client,
+      credentials: true
     })
     return corsHandler(c, next)
   }
