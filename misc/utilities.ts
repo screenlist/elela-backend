@@ -5,7 +5,7 @@ import { getCookie } from '@hono/hono/cookie'
 import { db } from "../database/config.ts";
 import { RecordId, surql } from "@surrealdb/surrealdb";
 import { ethers } from 'ethers'
-import { encodeHex, decodeHex } from '@std/encoding'
+import { encodeHex, decodeHex, encodeBase64 } from '@std/encoding'
 import { CoinAPIResponse, Rate } from "../routes/payments/payments.config.ts";
 import { Session, Visit } from "../routes/canal/canal.config.ts";
 import { Broadcaster } from '../routes/canal/canal.config.ts'
@@ -398,7 +398,6 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
     const bearer = c.req.header('Authorization')?.split(' ')[1] || getCookie(c, 'visitor_token') || getCookie(c, 'access_token')
     
     if(!bearer){ throw new HTTPException(401, {message: 'Access denied'}) }
-    console.log(bearer)
     const jwt = bearer
     const encoder = new TextEncoder()
     const jwtSecret = Deno.env.get('JWT_SECRET')
@@ -575,5 +574,82 @@ export class Obfuscator {
     )
 
     return decoder.decode(decrypted)
+  }
+}
+
+export async function setUpStorage(){
+  console.log('Checking storage configuration rules.')
+  const endpoint = Deno.env.get('BB_ENDPOINT_API')
+  const bucket = Deno.env.get('BB_BUCKET_ID')
+  const env = Deno.env.get('APP_ENV')
+  const id = Deno.env.get('BB_KEY_ID_ADMIN')
+  const key = Deno.env.get('BB_KEY_ADMIN')
+  const rule_name = 'elelaRules2025-V2'
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${encodeBase64(`${id}:${key}`)}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){ throw new Error(storage_account_auth.message) }
+
+  const list_buckets_res = await fetch(endpoint+'/b2api/v4/b2_list_buckets', {
+    method: 'POST',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    },
+    body: JSON.stringify({
+      accountId: storage_account_auth.accountId,
+      bucketId: bucket
+    })
+  })
+  const list_buckets = await list_buckets_res.json()
+  if(!list_buckets_res.ok){ throw new Error(list_buckets.message) }
+
+  interface Rules {
+    corsRuleName: string
+    allowedOrigins: string[]
+    allowedHeaders: string[]
+    allowedOperations: string[]
+    exposeHeaders: string[]
+    maxAgeSeconds: number
+  }
+  const rules: Rules[] = list_buckets.buckets[0].corsRules
+  const has_cors = rules.findIndex((val: Rules) => val.corsRuleName === rule_name )
+  if(has_cors < 0){
+    console.log('Creating new storage configuration rules.')
+    const origins: string[] = []
+
+    if(env === 'production'){
+      origins.push('https://*.elela.online')
+    } else {
+      origins.push('*')
+    }
+    
+    const update_bucket_res = await fetch(endpoint+'/b2api/v4/b2_update_bucket', {
+      method: 'POST',
+      headers: {
+        'Authorization': storage_account_auth.authorizationToken
+      },
+      body: JSON.stringify({
+        accountId: storage_account_auth.accountId,
+        bucketId: bucket,
+        corsRules: [
+          {
+            corsRuleName: rule_name,
+            allowedOrigins: origins,
+            allowedOperations: ['b2_upload_file', 'b2_upload_part', 'b2_download_file_by_name'],
+            maxAgeSeconds: 3600,
+            allowedHeaders: ['*']
+          }
+        ]
+      })
+    })
+    const update_bucket = await update_bucket_res.json()
+    if(!update_bucket_res.ok){ throw new Error(update_bucket.message) }
+    console.log('New storage configuration rules created.')
+  } else {
+    console.log('Storage already rules configured.')
   }
 }
