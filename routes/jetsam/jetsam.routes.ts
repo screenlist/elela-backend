@@ -130,10 +130,14 @@ jetsam.delete('/cargo/:id', verifyRequest(['sailor']), async c => {
   if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
 
   const delete_file_res = await fetch(endpoint+'/b2api/v4/b2_delete_file_version', {
-    method: 'GET',
+    method: 'POST',
     headers: {
       'Authorization': storage_account_auth.authorizationToken
-    }
+    },
+    body: JSON.stringify({
+      fileName: cargo.original_filename,
+      fileId: cargo.b2_file_id
+    })
   })
   const delete_file = await delete_file_res.json()
   if(!delete_file_res.ok){throw new HTTPException(404, { message:  delete_file.message })}
@@ -477,7 +481,7 @@ jetsam.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => 
     throw new HTTPException(404, { message:  error.message })
   }
   await db.query(surql`RELATE ${cargo.id}->opened_by->${new RecordId(user.table, user.id)};`)
-  
+
   c.header('Content-Disposition', 'inline')
   c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
   return stream(c, async stream => {
