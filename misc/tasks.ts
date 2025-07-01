@@ -22,3 +22,10 @@ export const cleanAbandonedPayments = CronJob.from({
     await db.query(surql`DELETE payment WHERE success = false AND created_at < time::now()-1d;`)
   },
 })
+
+export const cleanPastBridges = CronJob.from({
+  cronTime: '0 * * * * *',
+  onTick: async function(){
+    await db.query(surql`DELETE bridge WHERE end_time < time::now();`)
+  },
+})
