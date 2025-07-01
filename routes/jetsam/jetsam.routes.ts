@@ -160,6 +160,15 @@ jetsam.post('/cost', verifyRequest(['sailor']), c => {
 })
 
 jetsam.post('/start', verifyRequest(['sailor']), async c => {
+  interface Information {
+    id: string
+    file_id?: string
+    session_id?: string
+    url: string
+    token: string
+    multipart: boolean
+  }
+
   if(!endpoint){ throw new HTTPException(400, { message: 'The object storage endpoint was not found' }) }
   const user = c.get('user')
 
@@ -207,89 +216,132 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   const clean_name = await sanitizeFilename(name)
   const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
 
-  const storage_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
     headers: {
       'Authorization': `Basic ${keys()}`
     }
   })
-  const storage_auth = await storage_auth_res.json()
-  if(!storage_auth_res.ok){throw new HTTPException(400, { message:  storage_auth.message })}
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(400, { message:  storage_account_auth.message })}
 
-  const start_file_res = await fetch(endpoint+'/b2api/v4/b2_start_large_file', {
-    method: 'POST',
-    headers: { 'Authorization': storage_auth.authorizationToken },
-    body: JSON.stringify({
-      fileName: file_storage_name,
-      contentType: type,
-      bucketId: bucket,
-      fileInfo: { large_file_sha1: sha1 }
+  if(size > 6 * ( 1024 ** 2 )){
+
+    const start_file_res = await fetch(endpoint+'/b2api/v4/b2_start_large_file', {
+      method: 'POST',
+      headers: { 'Authorization': storage_account_auth.authorizationToken },
+      body: JSON.stringify({
+        fileName: file_storage_name,
+        contentType: type,
+        bucketId: bucket,
+        fileInfo: { large_file_sha1: sha1 }
+      })
     })
-  })
-  const start_file = await start_file_res.json()
-  if(!start_file_res.ok){ throw new HTTPException(400, { message: start_file.message }) }
+    const start_file = await start_file_res.json()
+    if(!start_file_res.ok){ throw new HTTPException(400, { message: start_file.message }) }
 
-  const file_id = start_file.fileId
+    const file_id = start_file.fileId
 
-  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
-    method: 'GET',
-    headers: { 'Authorization': storage_auth.authorizationToken }
-  })
+    const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
+      method: 'GET',
+      headers: { 'Authorization': storage_account_auth.authorizationToken }
+    })
 
-  const upload_url = await upload_url_res.json()
+    const upload_url = await upload_url_res.json()
 
-  if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
+    if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
 
-  const cargo_content = {
-    canal: canal.id, 
-    b2_file_id: file_id,
-    subpoints: costs.total_subpoints,
-    downloads_count: 0,
-    downloads_total: downloads,
-    name: clean_name,
-    original_filename: file_storage_name,
-    content_type: type,
-    sha1: sha1,
-    size: size,
-    is_complete: false,
-    is_independent: true,
-    is_public: false,
-    storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
+    const cargo_content = {
+      canal: canal.id, 
+      b2_file_id: file_id,
+      subpoints: costs.total_subpoints,
+      downloads_count: 0,
+      downloads_total: downloads,
+      name: clean_name,
+      original_filename: file_storage_name,
+      content_type: type,
+      sha1: sha1,
+      size: size,
+      is_complete: false,
+      is_independent: true,
+      is_public: false,
+      storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
+    }
+    const cargo = (await db.query<Array<Cargo[]>>(surql`CREATE cargo CONTENT ${cargo_content};`).catch((err) => {
+      throw new HTTPException(400, { message: err.message })
+    }))[0][0]
+
+    const session_content = {
+      cargo: cargo.id,
+      total_chunks: chunks,
+      uploaded_chunks: []
+    }
+    const session = (await db.query<Array<UploadSession[]>>(surql`CREATE upload_session CONTENT ${session_content};`).catch((err) => {
+      throw new HTTPException(400, { message: err.message })
+    }))[0][0]
+
+    const information: Information = {
+      id: cargo.id.id.toString(),
+      file_id: file_id,
+      session_id: session.id.id.toString(),
+      url: upload_url.url,
+      token: upload_url.authorizationToken,
+      multipart: true
+    }
+
+    await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
+      throw new HTTPException(400, { message: 'Error updating usage' })
+    })
+
+    return c.json(information)
+
+  } else {
+
+    const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_url?bucketId=${bucket}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': storage_account_auth.authorizationToken
+      }
+    })
+    const upload_url = await upload_url_res.json()
+    if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
+
+    const { name, sha1, type, size } = validation.data
+    const clean_name = await sanitizeFilename(name)
+    const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+
+    const cargo_content: Partial<Cargo> = {
+      canal: canal.id,
+      subpoints: 0,
+      downloads_count: 0,
+      downloads_total: downloads,
+      name: clean_name,
+      original_filename: file_storage_name,
+      content_type: type,
+      sha1: sha1,
+      size: size,
+      is_complete: false,
+      is_independent: true,
+      is_public: false,
+      storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
+    }
+
+    const cargo = (await db.query<Array<Cargo>>(surql`CREATE ONLY cargo CONTENT ${cargo_content};`))[0]
+
+    await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
+      throw new HTTPException(400, { message: 'Error updating usage' })
+    })
+
+    const information: Information = {
+      id: cargo.id.id.toString(),
+      url: upload_url.url,
+      token: upload_url.authorizationToken,
+      multipart: false
+    }
+
+    return c.json(information)
+    
   }
-  const cargo = (await db.query<Array<Cargo[]>>(surql`CREATE cargo CONTENT ${cargo_content};`).catch((err) => {
-    throw new HTTPException(400, { message: err.message })
-  }))[0][0]
-
-  const session_content = {
-    cargo: cargo.id,
-    total_chunks: chunks,
-    uploaded_chunks: []
-  }
-  const session = (await db.query<Array<UploadSession[]>>(surql`CREATE upload_session CONTENT ${session_content};`).catch((err) => {
-    throw new HTTPException(400, { message: err.message })
-  }))[0][0]
-
-  interface Information {
-    id: string
-    file_id: string
-    session_id: string
-    url: string,
-    token: string
-  }
-
-  const information: Information = {
-    id: cargo.id.id.toString(),
-    file_id: file_id,
-    session_id: session.id.id.toString(),
-    url: upload_url.url,
-    token: upload_url.authorizationToken
-  }
-
-  await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
-    throw new HTTPException(400, { message: 'Error updating usage' })
-  })
-
-  return c.json(information)
 })
 
 jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
