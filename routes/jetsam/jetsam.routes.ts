@@ -24,7 +24,7 @@ const jetsam = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave'
 
 jetsam.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true};`).catch((_err) => {
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} AND is_independent = ${true};`).catch((_err) => {
     throw new HTTPException(404, { message: 'Could not fetch the cargo' })
   }))[0]
   return c.json(cargo)
@@ -32,7 +32,7 @@ jetsam.get('/', verifyRequest(['sailor']), async c => {
 
 jetsam.get('/unfinished', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${false};`).catch((_err) => {
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${false} AND is_independent = ${true};`).catch((_err) => {
     throw new HTTPException(404, { message: 'Could not fetch the cargo' })
   }))[0]
   return c.json(cargo)
@@ -147,7 +147,7 @@ jetsam.delete('/cargo/:id', verifyRequest(['sailor']), async c => {
   return c.json({ status: 'success' })
 })
 
-jetsam.post('/cost', c => {
+jetsam.post('/cost', verifyRequest(['sailor']), c => {
   const size = c.req.query('size')
   const downloads = c.req.query('downloads') ? Number(c.req.query('downloads')) : 3
   const retention = c.req.query('retention') ? Number(c.req.query('retention')) : 1
