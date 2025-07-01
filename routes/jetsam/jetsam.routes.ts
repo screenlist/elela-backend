@@ -164,13 +164,13 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
 
   const schema = z.object({
-    sha1: z.string({ message: 'Provide a SHA1 hash of the file' }),
-    type: z.string({ message: 'Provide the content type of the file' }),
-    name: z.string({ message: 'Provide the file name' }),
-    size: z.number({ message: 'Provide the file size', coerce: true }).min(1, 'File size must be at least 1 byte'),
-    downloads: z.number({ message: 'Provide the desired number of downloads', coerce: true }).min(3, 'Every file is required to have at 3 downloads'),
-    retention: z.number({ message: 'Provide the desired number of retention months', coerce: true }).min(1, 'Every file must have at least 1 months of retention'),
-    chunks: z.number({ message: 'Provide the total number of file chunks', coerce: true }).min(2, 'There must be at least 2 chunks').max(10000, 'There cannot be more than 10 000 chunks')
+    sha1: z.string({ message: 'Provide a SHA1 hash of the cargo' }),
+    type: z.string({ message: 'Provide the content type of the cargo' }),
+    name: z.string({ message: 'Provide the cargo name' }),
+    size: z.number({ message: 'Provide the cargo size', coerce: true }).min(1, 'Cargo size must be at least 1 byte').max(40 * (1024 ** 3), 'Cargo cannot be bigger than 40GB in size'),
+    downloads: z.number({ message: 'Provide the desired number of downloads', coerce: true }).min(3, 'Every cargo is required to have at 3 downloads'),
+    retention: z.number({ message: 'Provide the desired number of retention months', coerce: true }).min(1, 'Every cargo must have at least 1 months of retention').max(36, 'Cargo storage cannot be paid 36 months into the future'),
+    chunks: z.number({ message: 'Provide the total number of cargo chunks', coerce: true }).min(2, 'There must be at least 2 chunks').max(10000, 'There cannot be more than 10 000 chunks')
   })
 
   const body = await c.req.json()
