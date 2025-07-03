@@ -7,6 +7,10 @@ export interface Information {
   url: string
   token: string
   multipart: boolean
+  name: string
+  sha1: string
+  size: number
+  type: string
 }
 
 export type Cargo = {

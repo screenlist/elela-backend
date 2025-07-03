@@ -274,9 +274,13 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     id: cargo.id.id.toString(),
     file_id: file_id,
     session_id: session.id.id.toString(),
-    url: upload_url.url,
+    url: upload_url.iploadUrl,
     token: upload_url.authorizationToken,
-    multipart: true
+    multipart: true,
+    name: file_storage_name,
+    sha1: cargo.sha1,
+    size: cargo.size,
+    type: cargo.content_type,
   }
 
   await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
@@ -400,7 +404,11 @@ jetsam.get('/large/session/:id/url', verifyRequest(['sailor']), async c => {
     session_id: session.id.id.toString(),
     url: upload_url.url,
     token: upload_url.authorizationToken,
-    multipart: true
+    multipart: true,
+    name: cargo.original_filename,
+    sha1: cargo.sha1,
+    size: cargo.size,
+    type: cargo.content_type,
   }
 
   return c.json(information)
@@ -556,8 +564,12 @@ jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
 
   const information: Information = {
     id: cargo.id.id.toString(),
-    url: upload_url.url,
+    url: upload_url.uploadUrl,
     token: upload_url.authorizationToken,
+    name: file_storage_name,
+    sha1: cargo.sha1,
+    size: cargo.size,
+    type: cargo.content_type,
     multipart: false
   }
 
