@@ -2,7 +2,7 @@
 import Surreal, { PreparedQuery } from '@surrealdb/surrealdb'
 import { canalTable, bridgeTable, waveTable, requestsToTable, connectsWithTable, conversationWithTable, authTable, sessionTable, visitTable } from '../routes/canal/canal.config.ts'
 import { paymentTable, rateTable } from "../routes/payments/payments.config.ts"
-import { cargoTable, uploadSessionTable } from "../routes/jetsam/jetsam.config.ts"
+import { cargoTable, uploadSessionTable, openedByTable } from "../routes/jetsam/jetsam.config.ts"
 
 export const db = await getSurreal()
 
@@ -340,6 +340,30 @@ export async function startUpDatabase(){
         const key = index as keyof typeof uploadSessionTable.indices;
         if(presentIndexes.indexOf(key) < 0){
           await db.query(uploadSessionTable.indices[key])
+        }
+      }
+    }
+
+    if(tables.indexOf('opened_by') < 0){
+      const schema =  `${openedByTable.table}\n` + Object.values(openedByTable.fields).join('\n') + Object.values(openedByTable.indices).join('\n');
+      const definition = new PreparedQuery(schema)
+      await db.query(definition)
+    } else { 
+      const openedBy_info = await db.query<any[]>('INFO FOR TABLE opened_by;')
+
+      const presentFields = Object.entries(openedBy_info[0].fields).map(field => field[0])
+      for(const field in openedByTable.fields){
+        const key = field as keyof typeof openedByTable.fields;
+        if(presentFields.indexOf(key) < 0){
+          await db.query(openedByTable.fields[key])
+        }
+      }
+
+      const presentIndexes = Object.entries(openedBy_info[0].indexes).map(field => field[0])
+      for(const index in openedByTable.indices){
+        const key = index as keyof typeof openedByTable.indices;
+        if(presentIndexes.indexOf(key) < 0){
+          await db.query(openedByTable.indices[key])
         }
       }
     }
