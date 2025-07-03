@@ -1,4 +1,13 @@
-import { RecordId } from "@surrealdb/surrealdb";
+import { RecordId } from "@surrealdb/surrealdb"
+
+export interface Information {
+  id: string
+  file_id?: string
+  session_id?: string
+  url: string
+  token: string
+  multipart: boolean
+}
 
 export type Cargo = {
   id: RecordId<string>

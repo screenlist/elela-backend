@@ -7,7 +7,7 @@ import { Billing, sanitizeFilename, verifyRequest } from "../../misc/utilities.t
 import { encodeBase64 } from "@std/encoding"
 import { equal } from '@std/assert/equal'
 import { z }  from 'zod'
-import { Cargo, UploadSession } from "./jetsam.config.ts";
+import { Cargo, UploadSession, Information } from "./jetsam.config.ts";
 import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
 
 const bucket = Deno.env.get('BB_BUCKET_ID')
@@ -160,14 +160,6 @@ jetsam.post('/cost', verifyRequest(['sailor']), c => {
 })
 
 jetsam.post('/start', verifyRequest(['sailor']), async c => {
-  interface Information {
-    id: string
-    file_id?: string
-    session_id?: string
-    url: string
-    token: string
-    multipart: boolean
-  }
 
   if(!endpoint){ throw new HTTPException(400, { message: 'The object storage endpoint was not found' }) }
   const user = c.get('user')
@@ -340,7 +332,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
     }
 
     return c.json(information)
-    
+
   }
 })
 
@@ -419,6 +411,49 @@ jetsam.delete('/session/:id', verifyRequest(['sailor']), async c => {
   await db.delete(cargo.id)
 
   return c.json({status: 'success'})
+})
+
+jetsam.get('/session/:id/url', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+
+  const session = (await db.query<Array<UploadSession[]>>(surql`
+    SELECT * FROM upload_session WHERE id = ${new RecordId('upload_session', id)} AND cargo.canal = ${new RecordId('canal', user.id)};
+  `).catch((_err) => {
+    throw new HTTPException(404, { message: 'Could not update upload session' })
+  }))[0][0]
+  if(!session){ throw new HTTPException(404, { message: 'This upload session was not found' }) }
+
+  const cargo = await db.select<Cargo>(session.cargo)
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${cargo.b2_file_id}`, {
+    method: 'GET',
+    headers: { 'Authorization': storage_account_auth.authorizationToken }
+  })
+
+  const upload_url = await upload_url_res.json()
+
+  if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
+
+  const information: Information = {
+    id: cargo.id.id.toString(),
+    file_id: cargo.b2_file_id,
+    session_id: session.id.id.toString(),
+    url: upload_url.url,
+    token: upload_url.authorizationToken,
+    multipart: true
+  }
+
+  return c.json(information)
 })
 
 jetsam.post('/finish', verifyRequest(['sailor']), async c => {
