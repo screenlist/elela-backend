@@ -159,7 +159,7 @@ jetsam.post('/cost', verifyRequest(['sailor']), c => {
   return c.json(new Billing().calculateSubpointForCargo(+size, downloads, retention))
 })
 
-jetsam.post('/start', verifyRequest(['sailor']), async c => {
+jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
 
   if(!endpoint){ throw new HTTPException(400, { message: 'The object storage endpoint was not found' }) }
   const user = c.get('user')
@@ -168,7 +168,7 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
     sha1: z.string({ message: 'Provide a SHA1 hash of the cargo' }),
     type: z.string({ message: 'Provide the content type of the cargo' }),
     name: z.string({ message: 'Provide the cargo name' }),
-    size: z.number({ message: 'Provide the cargo size', coerce: true }).min(1, 'Cargo size must be at least 1 byte').max(40 * (1024 ** 3), 'Cargo cannot be bigger than 40GB in size'),
+    size: z.number({ message: 'Provide the cargo size', coerce: true }).min(9 * (1024 ** 2), 'Large cargo size must be at least 1 byte').max(40 * (1024 ** 3), 'Large cargo cannot be bigger than 40GB in size'),
     downloads: z.number({ message: 'Provide the desired number of downloads', coerce: true }).min(3, 'Every cargo is required to have at 3 downloads'),
     retention: z.number({ message: 'Provide the desired number of retention months', coerce: true }).min(1, 'Every cargo must have at least 1 months of retention').max(36, 'Cargo storage cannot be paid 36 months into the future'),
     chunks: z.number({ message: 'Provide the total number of cargo chunks', coerce: true }).min(2, 'There must be at least 2 chunks').max(10000, 'There cannot be more than 10 000 chunks')
@@ -217,126 +217,76 @@ jetsam.post('/start', verifyRequest(['sailor']), async c => {
   const storage_account_auth = await storage_account_auth_res.json()
   if(!storage_account_auth_res.ok){throw new HTTPException(400, { message:  storage_account_auth.message })}
 
-  if(size > 6 * ( 1024 ** 2 )){
-
-    const start_file_res = await fetch(endpoint+'/b2api/v4/b2_start_large_file', {
-      method: 'POST',
-      headers: { 'Authorization': storage_account_auth.authorizationToken },
-      body: JSON.stringify({
-        fileName: file_storage_name,
-        contentType: type,
-        bucketId: bucket,
-        fileInfo: { large_file_sha1: sha1 }
-      })
+  const start_file_res = await fetch(endpoint+'/b2api/v4/b2_start_large_file', {
+    method: 'POST',
+    headers: { 'Authorization': storage_account_auth.authorizationToken },
+    body: JSON.stringify({
+      fileName: file_storage_name,
+      contentType: type,
+      bucketId: bucket,
+      fileInfo: { large_file_sha1: sha1 }
     })
-    const start_file = await start_file_res.json()
-    if(!start_file_res.ok){ throw new HTTPException(400, { message: start_file.message }) }
+  })
+  const start_file = await start_file_res.json()
+  if(!start_file_res.ok){ throw new HTTPException(400, { message: start_file.message }) }
 
-    const file_id = start_file.fileId
+  const file_id = start_file.fileId
 
-    const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
-      method: 'GET',
-      headers: { 'Authorization': storage_account_auth.authorizationToken }
-    })
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_part_url?fileId=${file_id}`, {
+    method: 'GET',
+    headers: { 'Authorization': storage_account_auth.authorizationToken }
+  })
 
-    const upload_url = await upload_url_res.json()
+  const upload_url = await upload_url_res.json()
 
-    if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
+  if(!upload_url_res.ok){ throw new HTTPException(400, { message: 'Could not fetch upload URLs' }) }
 
-    const cargo_content = {
-      canal: canal.id, 
-      b2_file_id: file_id,
-      subpoints: costs.total_subpoints,
-      downloads_count: 0,
-      downloads_total: downloads,
-      name: clean_name,
-      original_filename: file_storage_name,
-      content_type: type,
-      sha1: sha1,
-      size: size,
-      is_complete: false,
-      is_independent: true,
-      is_public: false,
-      storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
-    }
-    const cargo = (await db.query<Array<Cargo[]>>(surql`CREATE cargo CONTENT ${cargo_content};`).catch((err) => {
-      throw new HTTPException(400, { message: err.message })
-    }))[0][0]
-
-    const session_content = {
-      cargo: cargo.id,
-      total_chunks: chunks,
-      uploaded_chunks: []
-    }
-    const session = (await db.query<Array<UploadSession[]>>(surql`CREATE upload_session CONTENT ${session_content};`).catch((err) => {
-      throw new HTTPException(400, { message: err.message })
-    }))[0][0]
-
-    const information: Information = {
-      id: cargo.id.id.toString(),
-      file_id: file_id,
-      session_id: session.id.id.toString(),
-      url: upload_url.url,
-      token: upload_url.authorizationToken,
-      multipart: true
-    }
-
-    await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
-      throw new HTTPException(400, { message: 'Error updating usage' })
-    })
-
-    return c.json(information)
-
-  } else {
-
-    const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_url?bucketId=${bucket}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': storage_account_auth.authorizationToken
-      }
-    })
-    const upload_url = await upload_url_res.json()
-    if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
-
-    const { name, sha1, type, size } = validation.data
-    const clean_name = await sanitizeFilename(name)
-    const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
-
-    const cargo_content: Partial<Cargo> = {
-      canal: canal.id,
-      subpoints: 0,
-      downloads_count: 0,
-      downloads_total: downloads,
-      name: clean_name,
-      original_filename: file_storage_name,
-      content_type: type,
-      sha1: sha1,
-      size: size,
-      is_complete: false,
-      is_independent: true,
-      is_public: false,
-      storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
-    }
-
-    const cargo = (await db.query<Array<Cargo>>(surql`CREATE ONLY cargo CONTENT ${cargo_content};`))[0]
-
-    await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
-      throw new HTTPException(400, { message: 'Error updating usage' })
-    })
-
-    const information: Information = {
-      id: cargo.id.id.toString(),
-      url: upload_url.url,
-      token: upload_url.authorizationToken,
-      multipart: false
-    }
-
-    return c.json(information)
-
+  const cargo_content = {
+    canal: canal.id, 
+    b2_file_id: file_id,
+    subpoints: costs.total_subpoints,
+    downloads_count: 0,
+    downloads_total: downloads,
+    name: clean_name,
+    original_filename: file_storage_name,
+    content_type: type,
+    sha1: sha1,
+    size: size,
+    is_complete: false,
+    is_independent: true,
+    is_public: false,
+    storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
   }
+  const cargo = (await db.query<Array<Cargo[]>>(surql`CREATE cargo CONTENT ${cargo_content};`).catch((err) => {
+    throw new HTTPException(400, { message: err.message })
+  }))[0][0]
+
+  const session_content = {
+    cargo: cargo.id,
+    total_chunks: chunks,
+    uploaded_chunks: []
+  }
+  const session = (await db.query<Array<UploadSession[]>>(surql`CREATE upload_session CONTENT ${session_content};`).catch((err) => {
+    throw new HTTPException(400, { message: err.message })
+  }))[0][0]
+
+  const information: Information = {
+    id: cargo.id.id.toString(),
+    file_id: file_id,
+    session_id: session.id.id.toString(),
+    url: upload_url.url,
+    token: upload_url.authorizationToken,
+    multipart: true
+  }
+
+  await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
+    throw new HTTPException(400, { message: 'Error updating usage' })
+  })
+
+  return c.json(information)
 })
 
-jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
+jetsam.patch('/large/session/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
   const schema = z.object({
@@ -375,7 +325,7 @@ jetsam.patch('/session/:id', verifyRequest(['sailor']), async c => {
   })
 })
 
-jetsam.delete('/session/:id', verifyRequest(['sailor']), async c => {
+jetsam.delete('/large/session/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
 
@@ -413,7 +363,7 @@ jetsam.delete('/session/:id', verifyRequest(['sailor']), async c => {
   return c.json({status: 'success'})
 })
 
-jetsam.get('/session/:id/url', verifyRequest(['sailor']), async c => {
+jetsam.get('/large/session/:id/url', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
 
@@ -456,7 +406,7 @@ jetsam.get('/session/:id/url', verifyRequest(['sailor']), async c => {
   return c.json(information)
 })
 
-jetsam.post('/finish', verifyRequest(['sailor']), async c => {
+jetsam.post('/large/finish', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const schema = z.object({
     file_id: z.string({ message: 'Provide the file id' }),
@@ -518,6 +468,147 @@ jetsam.post('/finish', verifyRequest(['sailor']), async c => {
   const cargo = (await db.query<Array<Cargo[]>>(surql`UPDATE type::record(${session.cargo.toString()}, 'cargo') SET is_complete = ${true};`))[0][0]
 
   return c.json(cargo)
+})
+
+jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+
+  const schema = z.object({
+    sha1: z.string({ message: 'Provide a SHA1 hash of the cargo' }),
+    type: z.string({ message: 'Provide the content type of the cargo' }),
+    name: z.string({ message: 'Provide the cargo name' }),
+    size: z.number({ message: 'Provide the cargo size', coerce: true }).min(1, 'Small cargo size must be at least 1 byte').max(9*1024*2024, 'Cannot upload small cargo bigger than 9MB'),
+    downloads: z.number({ message: 'Provide the desired number of downloads', coerce: true }).min(3, 'Every cargo is required to have at 3 downloads'),
+    retention: z.number({ message: 'Provide the desired number of retention months', coerce: true }).min(1, 'Every cargo must have at least 1 months of retention').max(36, 'Cargo storage cannot be paid 36 months into the future')
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({
+    sha1: body.sha1, 
+    type: body.type, 
+    name: body.name,
+    size: body.size,
+    downloads: body.downloads,
+    retention: body.retention
+  })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.sha1){ formatted.sha1._errors.forEach(val => message.push(val)) }
+    if(formatted.type){ formatted.type._errors.forEach(val => message.push(val)) }
+    if(formatted.name){ formatted.name?._errors.forEach(val => message.push(val)) }
+    if(formatted.size){ formatted.size?._errors.forEach(val => message.push(val)) }
+    if(formatted.downloads){ formatted.downloads?._errors.forEach(val => message.push(val)) }
+    if(formatted.retention){ formatted.retention?._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const { sha1, name, type, size, downloads, retention } = validation.data
+
+  const costs = new Billing().calculateSubpointForCargo(size, downloads, retention)
+  const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
+
+  const clean_name = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(400, { message:  storage_account_auth.message })}
+
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_upload_url?bucketId=${bucket}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  const upload_url = await upload_url_res.json()
+  if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
+
+  const cargo_content: Partial<Cargo> = {
+    canal: canal.id,
+    subpoints: 0,
+    downloads_count: 0,
+    downloads_total: downloads,
+    name: clean_name,
+    original_filename: file_storage_name,
+    content_type: type,
+    sha1: sha1,
+    size: size,
+    is_complete: false,
+    is_independent: true,
+    is_public: false,
+    storage_valid_until: new Date( Date.now() + ( 1000*60*60*24*30*retention ) )
+  }
+
+  const cargo = (await db.query<Array<Cargo>>(surql`CREATE ONLY cargo CONTENT ${cargo_content};`))[0]
+
+  await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
+    throw new HTTPException(400, { message: 'Error updating usage' })
+  })
+
+  const information: Information = {
+    id: cargo.id.id.toString(),
+    url: upload_url.url,
+    token: upload_url.authorizationToken,
+    multipart: false
+  }
+
+  return c.json(information)
+})
+
+jetsam.post('/small/finish', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const cargo_id = c.req.query('cargo')
+
+  if(!cargo_id){ throw new HTTPException(400, { message: 'Provide the cargo id' }) }
+
+  const schema = z.object({
+    file_id: z.string({ message: 'Provide the cargo file id' })
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({ file_id: body.file_id })
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    const  message: string[] = []
+    formatted._errors.forEach(val => message.push(val))
+    if(formatted.file_id){ formatted.file_id._errors.forEach(val => message.push(val)) }
+    throw new HTTPException(404, { message: message.join(' • ')  }) 
+  }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const upload_url_res = await fetch(`${endpoint}/b2api/v4/b2_get_file_info?fileId=${validation.data.file_id}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken
+    }
+  })
+  const upload_url = await upload_url_res.json()
+  if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
+
+  const cargo = (await db.query<Array<Cargo>>(surql`
+    UPDATE ONLY cargo SET is_complete = ${true}, b2_file_id = ${validation.data.file_id} WHERE id = ${new RecordId('cargo', cargo_id)} AND canal = ${new RecordId('canal', user.id)} AND is_complete = ${false};
+  `))[0]
+  if(!cargo){ throw new HTTPException(404, { message:  'Cargo not found' }) }
+
+  return c.json({id: cargo.id.id.toString()})
 })
 
 jetsam.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
