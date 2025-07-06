@@ -91,14 +91,13 @@ export const uploadSessionTable = {
     total_chunks: 'DEFINE FIELD total_chunks ON TABLE upload_session TYPE number;',
     created_at: 'DEFINE FIELD created_at ON TABLE upload_session TYPE datetime DEFAULT time::now() READONLY;',
     updated_at: 'DEFINE FIELD updated_at ON TABLE upload_session TYPE datetime DEFAULT ALWAYS time::now();',
-    uploaded_chunks: 'DEFINE FIELD uploaded_chunks ON TABLE upload_session TYPE array<object> DEFAULT ALWAYS [];',
+    uploaded_chunks: 'DEFINE FIELD uploaded_chunks ON TABLE upload_session TYPE set<object> DEFAULT ALWAYS [];',
     'uploaded_chunks[*].index': 'DEFINE FIELD uploaded_chunks[*].index ON TABLE upload_session TYPE number;',
     'uploaded_chunks[*].sha1': 'DEFINE FIELD uploaded_chunks[*].sha1 ON TABLE upload_session TYPE string;',
     'uploaded_chunks[*].size': 'DEFINE FIELD uploaded_chunks[*].size ON TABLE upload_session TYPE number;'
   },
   indices: {
     unique_cargo: 'DEFINE INDEX unique_cargo ON TABLE upload_session FIELDS cargo UNIQUE;',
-    unique_uploaded_chunks_index: 'DEFINE INDEX unique_uploaded_chunks_index ON TABLE upload_session FIELDS uploaded_chunks[*].index UNIQUE;'
   }
 }
 
