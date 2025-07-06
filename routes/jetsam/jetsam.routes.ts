@@ -205,8 +205,8 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
-  const clean_name = await sanitizeFilename(name)
-  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+  const sanitisation = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${sanitisation.storage_name}`
 
   const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
@@ -247,7 +247,7 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     subpoints: costs.total_subpoints,
     downloads_count: 0,
     downloads_total: downloads,
-    name: clean_name,
+    name: sanitisation.display_name,
     original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,
@@ -274,7 +274,7 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     id: cargo.id.id.toString(),
     file_id: file_id,
     session_id: session.id.id.toString(),
-    url: upload_url.iploadUrl,
+    url: upload_url.uploadUrl,
     token: upload_url.authorizationToken,
     multipart: true,
     name: file_storage_name,
@@ -519,8 +519,8 @@ jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
-  const clean_name = await sanitizeFilename(name)
-  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+  const sanitisation = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${sanitisation.storage_name}`
 
   const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
@@ -545,7 +545,7 @@ jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
     subpoints: costs.total_subpoints,
     downloads_count: 0,
     downloads_total: downloads,
-    name: clean_name,
+    name: sanitisation.display_name,
     original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,
@@ -760,16 +760,16 @@ jetsam.post('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c =>
   if(!upload_url_res.ok){throw new HTTPException(404, { message:  upload_url.message })}
 
   const { name, sha1, type, size } = validation.data
-  const clean_name = await sanitizeFilename(name)
-  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${clean_name}`
+  const sanitisation = await sanitizeFilename(name)
+  const file_storage_name = `${canal.letter_sequence.replace(/[^A-Z]/g, '')}/${sanitisation.storage_name}`
 
-  const cargo_content = {
+  const cargo_content: Partial<Cargo> = {
     canal: canal.id, 
     bridge: is_connected.out,
     subpoints: 0,
     downloads_count: 0,
     downloads_total: 2,
-    name: clean_name,
+    name: sanitisation.display_name,
     original_filename: file_storage_name,
     content_type: type,
     sha1: sha1,

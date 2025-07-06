@@ -654,7 +654,7 @@ export async function setUpStorage(){
   }
 }
 
-export async function sanitizeFilename(filename: string): Promise<string> {
+export async function sanitizeFilename(filename: string) {
   const lastDotIndex = filename.lastIndexOf('.')
   let name = filename
   let extension = ''
@@ -664,7 +664,11 @@ export async function sanitizeFilename(filename: string): Promise<string> {
     extension = filename.substring(lastDotIndex)
   }
   const random_word = await diceware(1)
-  const sanitizedName = name.replace(/[^a-zA-Z0-9]/g, '_')+`_${random_word.toString()}`
+  const sanitised_name = name.replace(/[^a-zA-Z0-9]/g, '_')
+  const sanitised_unique_name = sanitised_name+`_${random_word.toString()}`
 
-  return sanitizedName + extension
+  return {
+    storage_name: sanitised_unique_name + extension,
+    display_name: sanitised_name + extension,
+  }
 }
