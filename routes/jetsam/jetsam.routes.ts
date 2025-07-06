@@ -542,7 +542,7 @@ jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
 
   const cargo_content: Partial<Cargo> = {
     canal: canal.id,
-    subpoints: 0,
+    subpoints: costs.total_subpoints,
     downloads_count: 0,
     downloads_total: downloads,
     name: clean_name,
