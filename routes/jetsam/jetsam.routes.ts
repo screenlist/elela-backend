@@ -12,7 +12,6 @@ import { Bridge, Canal, ConnectsWith } from "../canal/canal.config.ts";
 
 const bucket = Deno.env.get('BB_BUCKET_ID')
 const endpoint = Deno.env.get('BB_ENDPOINT_API')
-const file_endpoint = Deno.env.get('BB_ENDPOINT_FILE')
 const keys = () => {
   const id = Deno.env.get('BB_KEY_ID')
   const key = Deno.env.get('BB_KEY')
@@ -55,6 +54,7 @@ jetsam.get('/cargo/:id/download', verifyRequest(['sailor']), async c => {
     throw new HTTPException(400, { message: 'Could not fetch the cargo' })
   }))[0][0]
   if(!cargo){ throw new HTTPException(404, { message: 'Cargo not found' }) }
+  if(cargo.downloads_total - cargo.downloads_count < 1){ throw new HTTPException(404, { message: 'This cargo has run out of downloads' }) }
 
   const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
     method: 'GET',
@@ -65,24 +65,35 @@ jetsam.get('/cargo/:id/download', verifyRequest(['sailor']), async c => {
   const storage_account_auth = await storage_account_auth_res.json()
   if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
 
-  const canal = await db.select<Canal>(new RecordId('canal', user.id))
-  const download_auth_res = await fetch(endpoint+'/b2api/v4/b2_get_download_authorization', {
-    method: 'POST',
+  const file_res = await fetch(`${endpoint}/b2api/v4/b2_download_file_by_id?fileId=${cargo.b2_file_id}`, {
+    method: 'GET',
     headers: {
       'Authorization': storage_account_auth.authorizationToken
-    },
-    body: JSON.stringify({
-      bucketId: bucket,
-      fileNamePrefix: `${canal.letter_sequence.replace(/[^A-Z]/g, '')}`,
-      validDurationInSeconds: 60*60*3
-    })
+    }
   })
-  const download_auth = await download_auth_res.json()
-  if(!download_auth_res.ok){throw new HTTPException(404, { message:  download_auth.message })}
+  if(!file_res.ok){
+    const error = await file_res.json()
+    throw new HTTPException(404, { message:  error.message })
+  }
 
-  const download_url = `https://${file_endpoint}/file/${bucket}/${cargo.original_filename}?Authorization=${download_auth.authorizationToken}`
+  const cargo_updated = (await db.query<Array<Cargo[]>>(surql`
+    UPDATE type::record(${cargo.id.toString()}, 'cargo') SET downloads_count += ${1};
+  `).catch((_err) => {
+    throw new HTTPException(400, { message: 'Could not fetch the cargo' })
+  }))[0][0]
 
-  return c.redirect(download_url)
+  if(!cargo_updated){ throw new HTTPException(404, { message: 'Cargo download count could not be updated' }) }
+
+  c.header('Content-Disposition', 'attachment')
+  c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
+  return stream(c, async stream => {
+    stream.onAbort(() => {  })
+    if(file_res.body){
+      await stream.pipe(file_res.body)
+    } else {
+      stream.abort()
+    }
+  })
 })
 
 jetsam.patch('/cargo/:id', verifyRequest(['sailor']), async c => {
