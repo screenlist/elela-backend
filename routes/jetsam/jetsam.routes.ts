@@ -37,6 +37,34 @@ jetsam.get('/unfinished', verifyRequest(['sailor']), async c => {
   return c.json(cargo)
 })
 
+jetsam.get('/statistics', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  type TotalSize = {
+    is_complete: boolean
+    size: number
+  }
+  type Publicity = {
+    is_public: boolean
+    total: number
+  }
+  type TotalCost = {
+    is_independent: boolean
+    cost: number
+  }
+  const [total_storage, publicity, total_cost] = await db.query<[TotalSize, Publicity[], TotalCost]>(surql`
+    SELECT math::sum(size) as size, is_complete FROM ONLY cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} GROUP is_complete;
+    SELECT count(id) as total, is_public FROM cargo WHERE canal = ${new RecordId('canal', user.id)} GROUP is_public;
+    SELECT math::sum(subpoints) as cost, is_independent FROM ONLY cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_independent = ${true} GROUP is_independent;
+  `).catch(error => { throw new HTTPException(404, { message: error.message }) })
+
+  return c.json({
+    total_subpoints: total_cost.cost,
+    cargo_public: publicity.find(val => val.is_public === true)?.total ?? 0,
+    cargo_private: publicity.find(val => val.is_public === false)?.total ?? 0,
+    total_size: total_storage.size
+  })
+})
+
 jetsam.get('/cargo/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
