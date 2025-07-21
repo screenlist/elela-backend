@@ -1,0 +1,13 @@
+FROM denoland/deno:2.2.2
+
+# Create working directory
+WORKDIR /app
+
+# Copy source
+COPY . .
+
+# Compile the main app
+RUN deno cache main.ts
+
+# Run the app
+CMD ["deno", "task", "prod"]
