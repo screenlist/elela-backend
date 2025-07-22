@@ -39,29 +39,18 @@ jetsam.get('/unfinished', verifyRequest(['sailor']), async c => {
 
 jetsam.get('/statistics', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  type TotalSize = {
-    is_complete: boolean
-    size: number
-  }
-  type Publicity = {
-    is_public: boolean
-    total: number
-  }
-  type TotalCost = {
-    is_independent: boolean
-    cost: number
-  }
-  const [total_storage, publicity, total_cost] = await db.query<[TotalSize, Publicity[], TotalCost]>(surql`
-    SELECT math::sum(size) as size, is_complete FROM ONLY cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} GROUP is_complete;
-    SELECT count(id) as total, is_public FROM cargo WHERE canal = ${new RecordId('canal', user.id)} GROUP is_public;
-    SELECT math::sum(subpoints) as cost, is_independent FROM ONLY cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_independent = ${true} GROUP is_independent;
+  const [total_storage, total_private, total_public, total_cost] = await db.query<[number, number, number, number]>(surql`
+    RETURN math::sum(SELECT VALUE size FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} AND is_independent = ${true});
+    RETURN math::sum(SELECT VALUE count(id) as total FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_public = ${false});
+    RETURN math::sum(SELECT VALUE count(id) as total FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_public = ${true});
+    RETURN math::sum(SELECT VALUE subpoints FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_independent = ${true});
   `).catch(error => { throw new HTTPException(404, { message: error.message }) })
 
   return c.json({
-    total_subpoints: total_cost.cost,
-    cargo_public: publicity.find(val => val.is_public === true)?.total ?? 0,
-    cargo_private: publicity.find(val => val.is_public === false)?.total ?? 0,
-    total_size: total_storage.size
+    total_subpoints: total_cost,
+    cargo_public: total_public,
+    cargo_private: total_private,
+    total_size: total_storage
   })
 })
 
