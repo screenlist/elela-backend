@@ -41,7 +41,7 @@ export type Rate = {
 export const paymentTable = {
   table: 'DEFINE TABLE payment SCHEMAFULL;',
   fields: {
-    canal: 'DEFINE FIELD canal ON TABLE payment TYPE option<record<canal>>',
+    canal: 'DEFINE FIELD canal ON TABLE payment TYPE option<record<canal>>;',
     points: 'DEFINE FIELD points ON TABLE payment TYPE number;',
     transaction_id: 'DEFINE FIELD transaction_id ON TABLE payment TYPE option<number|string>;',
     amount: 'DEFINE FIELD amount ON TABLE payment TYPE number ASSERT $value > 0;',
