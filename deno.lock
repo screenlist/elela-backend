@@ -10,11 +10,15 @@
     "jsr:@surrealdb/surrealdb@^1.2.1": "1.2.1",
     "npm:@types/node@*": "22.12.0",
     "npm:cron@^4.3.0": "4.3.0",
+    "npm:cry@*": "0.0.0",
+    "npm:crypto@*": "1.0.1",
     "npm:ethers@^6.13.5": "6.13.5",
     "npm:isows@^1.0.6": "1.0.6_ws@8.18.1",
     "npm:otpauth@^9.4.0": "9.4.0",
+    "npm:posthog-node@^5.6.0": "5.6.0",
     "npm:ua-parser-js@^2.0.3": "2.0.3",
     "npm:uuidv7@^1.0.1": "1.0.2",
+    "npm:zlib@*": "1.0.5",
     "npm:zod@^3.24.3": "3.24.3"
   },
   "jsr": {
@@ -107,6 +111,12 @@
         "@types/luxon",
         "luxon"
       ]
+    },
+    "cry@0.0.0": {
+      "integrity": "sha512-pwivgOekqJYRtLRZhv3Fsk2QdBrY4WMxFMpX/WEsoZibcMK9v/8BbJwVwd5T/aXZ6X5xQMy+ilPkzB4OgrkfCw=="
+    },
+    "crypto@1.0.1": {
+      "integrity": "sha512-VxBKmeNcqQdiUQUW2Tzq0t377b54N2bMtXO/qiLa+6eRRmmC4qT3D4OnTGoT/U6O9aklQ/jTwbOtRMTTY8G0Ig=="
     },
     "delayed-stream@1.0.0": {
       "integrity": "sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ=="
@@ -243,6 +253,9 @@
         "@noble/hashes@1.7.1"
       ]
     },
+    "posthog-node@5.6.0": {
+      "integrity": "sha512-MVXxKmqAYp2cPBrN1YMhnhYsJYIu6yc6wumbHz1dbo67wZBf2WtMm67Uh+4VCrp07049qierWlxQqz1W5zGDeg=="
+    },
     "tr46@0.0.3": {
       "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw=="
     },
@@ -287,6 +300,9 @@
     "ws@8.18.1": {
       "integrity": "sha512-RKW2aJZMXeMxVpnZ6bck+RswznaxmzdULiBr6KY7XkTnW8uvt0iT9H5DkHUChXrc+uurzwa0rVI16n/Xzjdz1w=="
     },
+    "zlib@1.0.5": {
+      "integrity": "sha512-40fpE2II+Cd3k8HWTWONfeKE2jL+P42iWJ1zzps5W51qcTsOUKM5Q5m2PFb0CLxlmFAaUuUdJGc3OfZy947v0w=="
+    },
     "zod@3.24.3": {
       "integrity": "sha512-HhY1oqzWCQWuUqvBFnsyrtZRhyPeR7SUGv+C4+MsisMuVfSPx8HpwWqH8tRahSlt6M3PiFAcoeFhZAqIXTxoSg=="
     }
@@ -301,6 +317,7 @@
       "npm:cron@^4.3.0",
       "npm:ethers@^6.13.5",
       "npm:otpauth@^9.4.0",
+      "npm:posthog-node@^5.6.0",
       "npm:ua-parser-js@^2.0.3",
       "npm:zod@^3.24.3"
     ]
