@@ -231,6 +231,7 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
 
   const costs = new Billing().calculateSubpointForCargo(size, downloads, retention)
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  if(canal.is_premium === false){ throw new HTTPException(403, { message: 'You need a premium canal to use this feature' }) }
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
   const sanitisation = await sanitizeFilename(name)
@@ -545,6 +546,7 @@ jetsam.post('/small/start', verifyRequest(['sailor']), async c => {
 
   const costs = new Billing().calculateSubpointForCargo(size, downloads, retention)
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
+  if(canal.is_premium === false){ throw new HTTPException(403, { message: 'You need a premium canal to use this feature' }) }
   if( costs.total_subpoints > (canal.capacity - canal.usage) ){ throw new HTTPException(400, { message: 'You have insufficient drops for this action' }) }
 
   const sanitisation = await sanitizeFilename(name)
