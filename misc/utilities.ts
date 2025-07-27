@@ -411,6 +411,8 @@ export function verifyRequest(roles: Array<'sailor' | 'seafarer'>){
       throw new HTTPException(401, { message: 'Access denied' })
     }
 
+    if(!roles.find(val => val === payload.role)){ throw new HTTPException(403, { message: 'You are not authorised' }) }
+
     if(payload.role === 'sailor'){
       if(!payload.sid){ throw new HTTPException(401, { message: 'Access denied' }) }
       const session = await db.select<Session>(new RecordId('session', payload.sid))
