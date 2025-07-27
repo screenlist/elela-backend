@@ -71,45 +71,43 @@ payments.get('/fiat', async c => {
   const priceCents = (  price* 100 ).toString()
   const reference = crypto.randomUUID()
   const redirect = `${Deno.env.get('CLIENT_HOST')}/generate/phrase?ref=${reference}`
-  try {
-    const response = await fetch(`${paystackUrl}/transaction/initialize`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${paystackSecret}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: decodeURIComponent(email),
-        currency: 'ZAR',
-        amount: priceCents,
-        callback_url: redirect,
-        reference: reference
-      })
-    })
-    
-    if(!response.ok){ throw new HTTPException(404,{ message: 'Could not initiate payment' }) }
 
-    const initiated = await response.json()
-
-    const paymentContent: PaymentContent = {
-      amount: price,
-      points: billing.flowpointsToSubpoints(quantity),
-      reference_code: reference,
-      currency: 'ZAR',
-      success: false
-    }
-
-    if(conduit){
-      const canal = await db.select<Canal>(new RecordId('canal', conduit))
-      if(!canal){ throw new HTTPException(404, { message: 'Payment failed, the canal does not exist' }) }
-      paymentContent.canal = canal.id
-    }
-
-    await db.query(surql`CREATE payment CONTENT ${paymentContent}`)
-    return c.json({ url: initiated.data['authorization_url'] })
-  } catch (error) {
-    throw new HTTPException(404,{ message: 'Could not initiate payment', cause: error })
+  const paymentContent: PaymentContent = {
+    amount: price,
+    points: billing.flowpointsToSubpoints(quantity),
+    reference_code: reference,
+    currency: 'ZAR',
+    success: false
   }
+
+  if(conduit){
+    const canal = await db.select<Canal>(new RecordId('canal', conduit))
+    if(!canal){ throw new HTTPException(404, { message: 'Payment failed, the canal does not exist' }) }
+    if(!canal.is_premium){ console.log('What the hell?'); throw new HTTPException(403, { message: 'Only premium canals can refill drops' }) }
+    paymentContent.canal = canal.id
+  }
+  
+  const response = await fetch(`${paystackUrl}/transaction/initialize`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${paystackSecret}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      email: decodeURIComponent(email),
+      currency: 'ZAR',
+      amount: priceCents,
+      callback_url: redirect,
+      reference: reference
+    })
+  })
+  
+  if(!response.ok){ throw new HTTPException(404,{ message: 'Could not initiate payment' }) }
+
+  const initiated = await response.json()
+
+  await db.query(surql`CREATE payment CONTENT ${paymentContent}`)
+  return c.json({ url: initiated.data['authorization_url'] })
 })
 
 payments.get('/crypto', async c => {
@@ -150,6 +148,7 @@ payments.get('/crypto', async c => {
   if(conduit){
     const canal = await db.select<Canal>(new RecordId('canal', conduit))
     if(!canal){ throw new HTTPException(404, { message: 'Payment failed, the canal does not exist' }) }
+    if(!canal.is_premium){ throw new HTTPException(403, { message: 'Only premium canals can refill drops' }) }
     paymentContent.canal = canal.id
   }
 
