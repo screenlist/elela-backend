@@ -23,10 +23,23 @@ const jetsam = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave'
 
 jetsam.get('/', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
-  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} AND is_independent = ${true};`).catch((_err) => {
+  const limit = c.req.query('limit') ? Number(c.req.query('limit')) : 10
+  const page = c.req.query('page') ? Number(c.req.query('page')) : 1
+  if(limit <= 0 || page <= 0){ throw new HTTPException(404, { message: 'Neither page or limit can be equal or less than zero' }) }
+  const start = (page - 1) * limit
+  const [cargo, total] = (await db.query<[Cargo[], number]>(surql`
+    SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} AND is_independent = ${true} ORDER BY created_at DESC LIMIT ${limit} START ${start};
+    RETURN count(SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND is_complete = ${true} AND is_independent = ${true});
+  `).catch((_err) => {
     throw new HTTPException(404, { message: 'Could not fetch the cargo' })
-  }))[0]
-  return c.json(cargo)
+  }))
+  const total_pages = Math.ceil(total/limit)
+  return c.json({
+    results: cargo,
+    navigation: [ (page-1 > 0 ? page-1 : 1), (page < total_pages ? page+1 : page) ],
+    has_previous_page: page > 1,
+    has_next_page: page < total_pages
+  })
 })
 
 jetsam.get('/unfinished', verifyRequest(['sailor']), async c => {
