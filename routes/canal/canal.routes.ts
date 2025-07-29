@@ -224,13 +224,13 @@ canal.post('/auth', async c => {
 
     const authContent = {
       token: new Obfuscator().generateKey(),
-      expires_at: new Date( Date.now() + 1000*60*3 ),
+      expires_at: new Date( Date.now() + 1000*60*1 ),
       canal: canal.id
     }
     const auth = (await db.query<[undefined, Auth[]]>(surql`
       LET $exist = count(SELECT * FROM auth WHERE canal = ${canal.id});
       IF $exist > 0 {
-        THROW "You can only authenticate every 3 minutes"
+        THROW "You can only log in once every minute"
       } ELSE {
         LET $new = CREATE auth CONTENT ${authContent};
         RETURN $new;
@@ -352,13 +352,13 @@ canal.post('/2fa/setup', verifyRequest(['sailor']), async c => {
   await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET auth_secret = ${encryptedSecret}, auth_salt = ${salt};`)
   const authContent = {
     token: new Obfuscator().generateKey(),
-    expires_at: new Date( Date.now() + 1000*60*3 ),
+    expires_at: new Date( Date.now() + 1000*60*1 ),
     canal: canal.id
   }
   const auth = (await db.query<[undefined, Auth[]]>(surql`
     LET $exist = count(SELECT * FROM auth WHERE canal = ${canal.id});
     IF $exist > 0 {
-      THROW "You can only authenticate every 3 minutes"
+      THROW "You can only authenticate once every minute"
     } ELSE {
       LET $new = CREATE auth CONTENT ${authContent};
       RETURN $new;
