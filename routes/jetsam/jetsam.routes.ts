@@ -38,7 +38,8 @@ jetsam.get('/', verifyRequest(['sailor']), async c => {
     results: cargo,
     navigation: [ (page-1 > 0 ? page-1 : 1), (page < total_pages ? page+1 : page) ],
     has_previous_page: page > 1,
-    has_next_page: page < total_pages
+    has_next_page: page < total_pages,
+    page_info: `${page} of ${total_pages}`
   })
 })
 
