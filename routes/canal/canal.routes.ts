@@ -13,6 +13,7 @@ import { verifyRequest, hexToBytes, generateUniqueFlare, Obfuscator, Billing, br
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit, Message, ConversationWith  } from './canal.config.ts';
 import { WSContext } from "@hono/hono/ws";
+import { decodeHex } from "@std/encoding";
 
 const canal = new Hono<{ Variables: {user: {id: string, table: 'canal' | 'wave', session: string}} }>()
 const billing = new Billing()
@@ -212,9 +213,18 @@ canal.post('/auth', async c => {
 
   const { sequence, passphrase_hash } = validation.data
 
-  const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE passphrase_hash = ${passphrase_hash} AND letter_sequence = ${sequence} LIMIT 1;`))[0][0]
+  const canal = (await db.query<[Canal[]]>(surql`SELECT * FROM canal WHERE letter_sequence = ${sequence} LIMIT 1;`))[0][0]
 
   if(!canal){ throw new HTTPException(400, { message: 'Authentication failed' }) }
+
+  if(!canal.passphrase_hash){ throw new HTTPException(400, { message: 'Canal not valid' }) }
+  
+  const stored_hash = decodeHex(canal.passphrase_hash)
+  const supplied_hash = decodeHex(passphrase_hash)
+
+  const match = timingSafeEqual(stored_hash, supplied_hash)
+
+  if(match === false){ throw new HTTPException(400, { message: 'Incorrect passphrase, try again' }) }
   
   if(canal.capacity - canal.usage === 0 && canal.is_premium === false){
     throw new HTTPException(400, { message: 'Maximum usage reached, generate a new canal' })
@@ -674,6 +684,7 @@ canal.get('/wave', verifyRequest(['seafarer']), async c => {
 canal.post('/wave', async c => {
   const schema = z.object({
     anchor: z.string().trim().refine(val => val.length >= 10, { message: 'The anchor must be at least 10 characters long' }),
+    salt: z.string(),
     counterflare: z.string().trim().refine(val => {
       const words = val.split(/\s+/)
       return words.length === 2 && words.every((word) => word.length >= 4) && words.every((word) => word.length <= 15)
@@ -682,7 +693,7 @@ canal.post('/wave', async c => {
   })
   
   const body = await c.req.json()
-  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare})
+  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare, salt: body.salt})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -691,27 +702,19 @@ canal.post('/wave', async c => {
     if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
     if(formatted.counterflare){ formatted.counterflare?._errors.forEach(val => message += `${val}; `) }
     if(formatted.anchor){ formatted.anchor?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.salt){ formatted.salt?._errors.forEach(val => message += `${val}; `) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { flare, counterflare, anchor } = validation.data
+  const { flare, counterflare, anchor, salt } = validation.data
 
   const bridge = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1;`))[0][0]
   if(!bridge){ throw new HTTPException(400, { message: 'Action not allowed' }) }
-  const { scrypt } = await import('node:crypto')
-  const scryptAsync = promisify(scrypt) as (
-    password: string | Uint8Array,
-    salt: string | Uint8Array,
-    keylen: number
-  ) => Promise<Uint8Array>
 
-  const salt = crypto.randomUUID()
-  const derivedKey = await scryptAsync(anchor, salt, 64)
-  const secretCode = Array.from(derivedKey).map((byte) => byte.toString(16).padStart(2, "0")).join("")
   const publicCode = await generateUniqueFlare(counterflare, 'wave', 120)
   const waveContent = {
     secret_salt: salt,
-    secret_code: secretCode,
+    secret_code: anchor,
     public_code: publicCode
   }
   const newWave = (await db.query<[Wave[]]>(surql`CREATE wave CONTENT ${waveContent};`))[0][0]
@@ -722,6 +725,48 @@ canal.post('/wave', async c => {
     flare: bridge.public_code,
     start_time: bridge.start_time,
     end_time: bridge.end_time
+  })
+})
+
+canal.post('/wave/salt', async c => {
+  const schema = z.object({
+    counterflare: z.string(),
+    flare: z.string()
+  })
+
+  const body = await c.req.json()
+  const validation = schema.safeParse({counterflare: body.counterflare, flare: body.flare})
+
+  if(validation.success === false){ 
+    const formatted = validation.error.format()
+    let message: string = ''
+    formatted._errors.forEach(val => message += `${val}; `)
+    if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
+    if(formatted.counterflare){ formatted.counterflare?._errors.forEach(val => message += `${val}; `) }
+    throw new HTTPException(404, { message: message  }) 
+  }
+
+  const { flare, counterflare } = validation.data
+
+  const [one, two] = await db.query<[Bridge[], Wave[]]>(surql`
+    SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1; 
+    SELECT * FROM wave WHERE public_code = ${counterflare} LIMIT 1;
+  `)
+  const bridge = one[0]
+  const wave = two[0]
+
+  if(!bridge){ throw new HTTPException(400, { message: 'This bridge has collapsed' }) }
+  if(!wave){  throw new HTTPException(400,  { message: 'This response never reached its destination' }) }
+
+  const [request] = await db.query<[RequestsTo]>(surql`
+    SELECT * FROM ONLY connects_with WHERE in = ${wave.id} AND out = ${bridge.id} LIMIT 1;
+  `)
+
+  if(!request){ throw new HTTPException(400, { message: 'No such response was found' }) }
+
+  return c.json({
+    secret_salt: wave.secret_salt,
+    public_code: wave.public_code
   })
 })
 
@@ -758,19 +803,19 @@ canal.post('/wave/auth', async c => {
   if(!bridge){ throw new HTTPException(400, { message: 'This bridge has collapsed' }) }
   if(!wave){  throw new HTTPException(400,  { message: 'This response never reached its destination' }) }
 
+  const [request] = await db.query<[RequestsTo]>(surql`
+    SELECT * FROM ONLY connects_with WHERE in = ${wave.id} AND out = ${bridge.id} LIMIT 1;
+  `)
+
+  if(!request){ throw new HTTPException(400, { message: 'No such response was found' }) }
+
   const session = (await db.query<Array<number>>(surql`RETURN count(SELECT * FROM visit WHERE wave = ${wave.id});`))[0]
 
-  if(session > 0){ throw new HTTPException(400, { message: 'You have an active session, logout first before proceeding' }) }
+  if(session > 0){ throw new HTTPException(400, { message: 'You have an active session elsewhere, logout first before proceeding' }) }
 
-  const { scrypt } = await import('node:crypto')
-  const scryptAsync = promisify(scrypt) as (
-    password: string | Uint8Array,
-    salt: string | Uint8Array,
-    keylen: number
-  ) => Promise<Uint8Array>
-  const provideSecret = await scryptAsync(anchor, wave.secret_salt, 64)
-  const storedSecret = hexToBytes(wave.secret_code)
-  const match = timingSafeEqual(storedSecret, provideSecret)
+  const providedSecret = decodeHex(anchor)
+  const storedSecret = decodeHex(wave.secret_code)
+  const match = timingSafeEqual(storedSecret, providedSecret)
 
   if(match === false){ throw new HTTPException(400, { message: 'The response or the anchor is wrong' }) }
 
