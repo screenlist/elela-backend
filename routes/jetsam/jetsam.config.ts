@@ -8,7 +8,7 @@ export interface Information {
   token: string
   multipart: boolean
   name: string
-  sha1: string
+  sha1?: string
   size: number
   type: string
 }
@@ -24,7 +24,7 @@ export type Cargo = {
   name: string
   original_filename: string
   content_type: string
-  sha1: string
+  sha1?: string
   size: number
   is_complete: boolean
   is_independent: boolean
@@ -68,7 +68,7 @@ export const cargoTable = {
     name: 'DEFINE FIELD name ON TABLE cargo TYPE string;',
     original_filename: 'DEFINE FIELD original_filename ON TABLE cargo TYPE string;',
     content_type: 'DEFINE FIELD content_type ON TABLE cargo TYPE string;',
-    sha1: 'DEFINE FIELD sha1 ON TABLE cargo TYPE string;',
+    sha1: 'DEFINE FIELD sha1 ON TABLE cargo TYPE option<string>;',
     size: 'DEFINE FIELD size ON TABLE cargo TYPE number;',
     is_complete: 'DEFINE FIELD is_complete ON TABLE cargo TYPE bool;',
     is_independent: 'DEFINE FIELD is_independent ON TABLE cargo TYPE bool;',

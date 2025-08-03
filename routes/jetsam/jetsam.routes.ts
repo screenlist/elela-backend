@@ -68,6 +68,7 @@ jetsam.get('/statistics', verifyRequest(['sailor']), async c => {
   })
 })
 
+// Limit the returned data
 jetsam.get('/cargo/:id', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
   const id = c.req.param('id')
@@ -117,6 +118,67 @@ jetsam.get('/cargo/:id/download', verifyRequest(['sailor']), async c => {
 
   c.header('Content-Disposition', 'attachment')
   c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
+  return stream(c, async stream => {
+    stream.onAbort(() => {  })
+    if(file_res.body){
+      await stream.pipe(file_res.body)
+    } else {
+      stream.abort()
+    }
+  })
+})
+
+jetsam.get('/cargo/:id/partial', verifyRequest(['sailor']), async c => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const range_header = c.req.header('Range')
+
+  if(!range_header){ throw new HTTPException(404, { message: 'No byte range supplied' }) }
+  if(/^bytes=\d+-\d+$/.test(range_header) === false){ throw new HTTPException(404, { message: 'Range is badly formatted' }) }
+
+  const start: number = +range_header.split('=')[1].split('-')[0]
+  const end: number = +range_header.split('=')[1].split('-')[1]
+
+  const cargo = (await db.query<Array<Cargo[]>>(surql`SELECT * FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND id = ${new RecordId('cargo', id)} LIMIT 1;`).catch((_err) => {
+    throw new HTTPException(400, { message: 'Could not fetch the cargo' })
+  }))[0][0]
+  if(!cargo){ throw new HTTPException(404, { message: 'Cargo not found' }) }
+
+  if(cargo.downloads_total - cargo.downloads_count < 1 && start === 0){ throw new HTTPException(404, { message: 'This cargo has run out of downloads' }) }
+
+  const storage_account_auth_res = await fetch(endpoint+'/b2api/v4/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Basic ${keys()}`
+    }
+  })
+  const storage_account_auth = await storage_account_auth_res.json()
+  if(!storage_account_auth_res.ok){throw new HTTPException(404, { message:  storage_account_auth.message })}
+
+  const file_res = await fetch(`${endpoint}/b2api/v4/b2_download_file_by_id?fileId=${cargo.b2_file_id}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': storage_account_auth.authorizationToken,
+      'Range': `bytes=${start}-${end}`
+    }
+  })
+  if(!file_res.ok){
+    const error = await file_res.json()
+    throw new HTTPException(404, { message:  error.message })
+  }
+
+  if(start === 0){
+    const cargo_updated = (await db.query<Array<Cargo[]>>(surql`
+      UPDATE type::record(${cargo.id.toString()}, 'cargo') SET downloads_count += ${1};
+    `).catch((_err) => {
+      throw new HTTPException(400, { message: 'Could not fetch the cargo' })
+    }))[0][0]
+    if(!cargo_updated){ throw new HTTPException(404, { message: 'Cargo download count could not be updated' }) }
+  }
+
+  c.header('Content-Disposition', 'attachment')
+  c.header('Content-Type', file_res.headers.get('Content-Type') || cargo.content_type)
+  c.header('Content-Range', file_res.headers.get('Content-Range') || `bytes ${start}-${end}/${cargo.size}`)
   return stream(c, async stream => {
     stream.onAbort(() => {  })
     if(file_res.body){
@@ -207,7 +269,6 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
   const user = c.get('user')
 
   const schema = z.object({
-    sha1: z.string({ message: 'Provide a SHA1 hash of the cargo' }),
     type: z.string({ message: 'Provide the content type of the cargo' }),
     name: z.string({ message: 'Provide the cargo name' }),
     size: z.number({ message: 'Provide the cargo size', coerce: true }).min(9 * (1024 ** 2), 'Large cargo size must be at least 1 byte').max(40 * (1024 ** 3), 'Large cargo cannot be bigger than 40GB in size'),
@@ -218,7 +279,6 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
 
   const body = await c.req.json()
   const validation = schema.safeParse({
-    sha1: body.sha1, 
     type: body.type, 
     name: body.name,
     size: body.size,
@@ -231,7 +291,6 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     const formatted = validation.error.format()
     const  message: string[] = []
     formatted._errors.forEach(val => message.push(val))
-    if(formatted.sha1){ formatted.sha1._errors.forEach(val => message.push(val)) }
     if(formatted.type){ formatted.type._errors.forEach(val => message.push(val)) }
     if(formatted.name){ formatted.name?._errors.forEach(val => message.push(val)) }
     if(formatted.size){ formatted.size?._errors.forEach(val => message.push(val)) }
@@ -241,7 +300,7 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     throw new HTTPException(404, { message: message.join(' • ')  }) 
   }
 
-  const { sha1, name, type, size, downloads, retention, chunks } = validation.data
+  const { name, type, size, downloads, retention, chunks } = validation.data
 
   const costs = new Billing().calculateSubpointForCargo(size, downloads, retention)
   const canal = await db.select<Canal>(new RecordId('canal', user.id))
@@ -265,9 +324,8 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     headers: { 'Authorization': storage_account_auth.authorizationToken },
     body: JSON.stringify({
       fileName: file_storage_name,
-      contentType: type,
-      bucketId: bucket,
-      fileInfo: { large_file_sha1: sha1 }
+      contentType: 'application/octet-stream',
+      bucketId: bucket
     })
   })
   const start_file = await start_file_res.json()
@@ -293,7 +351,6 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     name: sanitisation.display_name,
     original_filename: file_storage_name,
     content_type: type,
-    sha1: sha1,
     size: size,
     is_complete: false,
     is_independent: true,
@@ -321,9 +378,8 @@ jetsam.post('/large/start', verifyRequest(['sailor']), async c => {
     token: upload_url.authorizationToken,
     multipart: true,
     name: file_storage_name,
-    sha1: cargo.sha1,
     size: cargo.size,
-    type: cargo.content_type,
+    type: cargo.content_type
   }
 
   await db.query(surql`UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${costs.total_subpoints};`).catch((_err) => {
