@@ -3,13 +3,12 @@ import { upgradeWebSocket } from '@hono/hono/deno'
 import { HTTPException } from '@hono/hono/http-exception'
 import { PreparedQuery, RecordId, surql } from '@surrealdb/surrealdb'
 import { SignJWT } from '@panva/jose'
-import { promisify } from 'node:util'
 import { timingSafeEqual } from 'node:crypto'
 import * as OTPAuth from 'otpauth'
 import { z }  from 'zod'
 import { UAParser } from 'ua-parser-js'
 import { db } from '../../database/config.ts'
-import { verifyRequest, hexToBytes, generateUniqueFlare, Obfuscator, Billing, broadcast, generateUniqueLetterSequence } from '../../misc/utilities.ts'
+import { verifyRequest, generateUniqueFlare, Obfuscator, Billing, broadcast, generateUniqueLetterSequence } from '../../misc/utilities.ts'
 import { Payment } from '../payments/payments.config.ts';
 import { Canal, Bridge, RequestsTo, Wave, ConnectsWith, Session, Auth, Visit, Message, ConversationWith  } from './canal.config.ts';
 import { WSContext } from "@hono/hono/ws";
