@@ -70,6 +70,7 @@ export type Bridge = {
   canal: RecordId<string>
   initiator_name: 'Sailor'
   public_code: string
+  public_key: string
   start_time: Date
   end_time: Date
   created_at: Date
@@ -82,6 +83,7 @@ export type Wave = {
   secret_code: string
   secret_salt: string
   public_code: string
+  public_key: string
   created_at: string
   updated_at: string
 }
@@ -181,6 +183,7 @@ export const bridgeTable = {
     canal: 'DEFINE FIELD canal ON TABLE bridge TYPE record<canal>;',
     initiator_name: `DEFINE FIELD initiator_name ON TABLE bridge TYPE string DEFAULT 'Sailor' READONLY;`,
     public_code: 'DEFINE FIELD public_code ON TABLE bridge TYPE string;',
+    public_key: 'DEFINE FIELD public_key ON TABLE bridge TYPE string;',
     start_time: 'DEFINE FIELD start_time ON TABLE bridge TYPE datetime;',
     end_time: 'DEFINE FIELD end_time ON TABLE bridge TYPE datetime;',
     created_at: 'DEFINE FIELD created_at ON TABLE bridge TYPE datetime DEFAULT time::now() READONLY;',
@@ -196,6 +199,7 @@ export const waveTable = {
   fields: {
     responder_name: `DEFINE FIELD responder_name ON TABLE wave TYPE string DEFAULT 'Seafarer' READONLY;`,
     public_code: 'DEFINE FIELD public_code ON TABLE wave TYPE string;',
+    public_key: 'DEFINE FIELD public_key ON TABLE wave TYPE string;',
     secret_code: 'DEFINE FIELD secret_code ON TABLE wave TYPE string;',
     secret_salt: 'DEFINE FIELD secret_salt ON TABLE wave TYPE string;',
     created_at: 'DEFINE FIELD created_at ON TABLE wave TYPE datetime DEFAULT time::now() READONLY;',
