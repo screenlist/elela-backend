@@ -498,7 +498,7 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
   
   const body = await c.req.json()
 
-  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time})
+  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time, public_key: body.public_key})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -896,7 +896,9 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
   return c.json({
     connection_id: is_connected.id,
     bridge_id: bridge.id,
+    bridge_key: bridge.public_key,
     wave_id: is_connected.in,
+    wave_key: wave.public_key,
     start_time: bridge.start_time,
     end_time: bridge.end_time,
     created_at: bridge.created_at,
