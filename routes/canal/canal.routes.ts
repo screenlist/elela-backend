@@ -1083,7 +1083,7 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
     onOpen: (_event, ws) => {
 
       const now = new Date()
-      if(conversation.size >= 2 || conversation.has(user_id.toString())){ 
+      if(conversation.size >= 2 && !conversation.has(user_id.toString())){ 
         ws.send(JSON.stringify({
           type: 'error',
           data: {
@@ -1119,7 +1119,6 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onClose: (_event, _ws) => {
-      console.log('Close fires')
       const now = new Date()
       conversation.delete(user_id.toString())
       conversations.set(meet.id.toString(), conversation)
@@ -1141,7 +1140,6 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onError: (_event, ws) => {
-      console.log('Error fires')
       const now = new Date()
       conversation.delete(user_id.toString())
       conversations.set(meet.id.toString(), conversation)
