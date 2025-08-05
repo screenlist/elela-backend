@@ -493,12 +493,13 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     start_time: z.preprocess((arg) => ( typeof arg === 'string' || arg instanceof Date ? new Date(arg) : undefined ), z.date()).refine(val => {
       return val > new Date()
     }, { message: 'You cannot schedule a bridge to a past date' }).refine(val => val <= new Date( Date.now() + 1000*60*60*24*90 ), {message: 'You cannot schedule a bridge more than 90 days in the future'}),
-    public_key: z.string({message: 'Provide your public key'})
+    public_key: z.string({message: 'Provide your public key'}),
+    regeneration_salt: z.string({message: 'Provide your key pair regeneration salt'})
   })
   
   const body = await c.req.json()
 
-  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time, public_key: body.public_key})
+  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time, public_key: body.public_key, regeneration_salt: body.regeneration_salt})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -507,10 +508,11 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
     if(formatted.start_time){ formatted.start_time?._errors.forEach(val => message += `${val};`) }
     if(formatted.public_key){ formatted.public_key?._errors.forEach(val => message += `${val};`) }
+    if(formatted.regeneration_salt){ formatted.regeneration_salt?._errors.forEach(val => message += `${val};`) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { flare, start_time, public_key } = validation.data
+  const { flare, start_time, public_key, regeneration_salt } = validation.data
 
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(canal.capacity - canal.usage <= 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
@@ -522,7 +524,8 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     public_code: code,
     start_time: new Date(start),
     end_time: new Date(end),
-    public_key: public_key
+    public_key: public_key,
+    regeneration_salt: regeneration_salt
   }
   const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${billing.calculateSubpointForBridge(30).subpoints};`)
   return c.json(newBridge[0])
@@ -692,11 +695,12 @@ canal.post('/wave', async c => {
       return words.length === 2 && words.every((word) => word.length >= 4) && words.every((word) => word.length <= 15)
     }, { message: 'Response flare must be exactly two words, each of at least 4 but no more than characters long'}),
     flare: z.string({message: 'Flare is required'}),
-    public_key: z.string({message: 'Provide your public key'})
+    public_key: z.string({message: 'Provide your public key'}),
+    regeneration_salt: z.string({message: 'Provide your key pair regeneration salt'})
   })
   
   const body = await c.req.json()
-  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare, salt: body.salt, public_key: body.public_key})
+  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare, salt: body.salt, public_key: body.public_key, regeneration_salt: body.regeneration_salt})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -707,10 +711,11 @@ canal.post('/wave', async c => {
     if(formatted.anchor){ formatted.anchor?._errors.forEach(val => message += `${val}; `) }
     if(formatted.salt){ formatted.salt?._errors.forEach(val => message += `${val}; `) }
     if(formatted.public_key){ formatted.public_key?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.regeneration_salt){ formatted.regeneration_salt?._errors.forEach(val => message += `${val}; `) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { flare, counterflare, anchor, salt, public_key } = validation.data
+  const { flare, counterflare, anchor, salt, public_key, regeneration_salt } = validation.data
 
   const bridge = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1;`))[0][0]
   if(!bridge){ throw new HTTPException(400, { message: 'Action not allowed' }) }
@@ -720,7 +725,8 @@ canal.post('/wave', async c => {
     secret_salt: salt,
     secret_code: anchor,
     public_code: publicCode,
-    public_key: public_key
+    public_key: public_key,
+    regeneration_salt: regeneration_salt
   }
   const newWave = (await db.query<[Wave[]]>(surql`CREATE wave CONTENT ${waveContent};`))[0][0]
   await db.query<[RequestsTo[]]>(surql`RELATE ${newWave.id}->requests_to->${bridge.id};`)
@@ -897,8 +903,10 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
     connection_id: is_connected.id,
     bridge_id: bridge.id,
     bridge_key: bridge.public_key,
+    bridge_regeneration: bridge.regeneration_salt,
     wave_id: is_connected.in,
     wave_key: wave.public_key,
+    wave_regeneration: wave.regeneration_salt,
     start_time: bridge.start_time,
     end_time: bridge.end_time,
     created_at: bridge.created_at,
