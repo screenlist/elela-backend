@@ -898,6 +898,9 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
   const wave = await db.select<Wave>(is_connected.in)
   const text = (await db.query<Array<ConversationWith[]>>(surql`SELECT * FROM conversation_with WHERE out = ${is_connected.id} ORDER created_at ASC LIMIT 100;`))[0]
   const [canal] = await db.query<Array<Canal>>(surql`SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${bridge.id} AND canal = ${bridge.canal};`)
+  const [total_storage] = await db.query<[number]>(surql`
+    RETURN math::sum(SELECT VALUE size FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND bridge = ${bridge.id} AND is_complete = ${true} AND is_independent = ${false});
+  `).catch(error => { throw new HTTPException(404, { message: error.message }) })
 
   return c.json({
     connection_id: is_connected.id,
@@ -913,7 +916,8 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
     flare: bridge.public_code,
     counterflare: wave.public_code,
     is_premium: canal.is_premium,
-    messages: text
+    messages: text,
+    total_storage: total_storage
   })
 })
 
@@ -956,6 +960,9 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
     user_id = meet.in
   }
 
+  const bridge = await db.select<Bridge>(meet.out)
+  const [canal] = await db.query<Array<Canal>>(surql`SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${bridge.id} AND canal = ${bridge.canal};`)
+
   const conversation = conversations.get(meet.id.toString()) ?? new Map<string, WSContext<WebSocket>>()
   const messages = all_messages.get(meet.id.toString()) ?? new Set<ConversationWith>()
   
@@ -981,7 +988,36 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
               has_attachment: msg.data.cargo ? true : false
             }
 
-            if(msg.data.cargo){ content.attachment = new RecordId('cargo', msg.data.cargo) }
+            if(msg.data.cargo){ 
+              content.attachment = new RecordId('cargo', msg.data.cargo)
+
+              const storage = (
+                await db.query<[number]>(surql`
+                  RETURN math::sum(SELECT VALUE size FROM cargo WHERE canal = ${canal.id} AND bridge = ${bridge.id} AND is_complete = ${true} AND is_independent = ${false});
+                `).catch(_error => { 
+                  ws.send(JSON.stringify({
+                    type: 'error',
+                    data: {
+                      from: user_id.toString(),
+                      message: 'Your message could be sent.',
+                      created_at: now
+                    }
+                  }))
+                })
+              )
+
+              if(storage){
+                broadcast({
+                  clients: conversation,
+                  sender: user_id.toString(),
+                  everywhere: true,
+                  message: JSON.stringify({
+                    type: 'storage',
+                    data: storage[0]
+                  })
+                })
+              }
+            }
 
             const saved = (await db.query<Array<ConversationWith[]>>(surql`
               RELATE ${user_id}->conversation_with->${meet.id} CONTENT ${content};
