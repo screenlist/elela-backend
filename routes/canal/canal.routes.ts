@@ -492,12 +492,14 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     }, { message: 'Flare must be exactly two words, each of at least 4 but no more than 15 characters long'}),
     start_time: z.preprocess((arg) => ( typeof arg === 'string' || arg instanceof Date ? new Date(arg) : undefined ), z.date()).refine(val => {
       return val > new Date()
-    }, { message: 'You cannot schedule a bridge to a past date' }).refine(val => val <= new Date( Date.now() + 1000*60*60*24*90 ), {message: 'You cannot schedule a bridge more than 90 days in the future'})
+    }, { message: 'You cannot schedule a bridge to a past date' }).refine(val => val <= new Date( Date.now() + 1000*60*60*24*90 ), {message: 'You cannot schedule a bridge more than 90 days in the future'}),
+    public_key: z.string({message: 'Provide your public key'}),
+    regeneration_salt: z.string({message: 'Provide your key pair regeneration salt'})
   })
   
   const body = await c.req.json()
 
-  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time})
+  const validation = schema.safeParse({flare: body.flare, start_time: body.start_time, public_key: body.public_key, regeneration_salt: body.regeneration_salt})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -505,10 +507,12 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     formatted._errors.forEach(val => message += `${val}; `)
     if(formatted.flare){ formatted.flare._errors.forEach(val => message += `${val}; `) }
     if(formatted.start_time){ formatted.start_time?._errors.forEach(val => message += `${val};`) }
+    if(formatted.public_key){ formatted.public_key?._errors.forEach(val => message += `${val};`) }
+    if(formatted.regeneration_salt){ formatted.regeneration_salt?._errors.forEach(val => message += `${val};`) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { flare, start_time } = validation.data
+  const { flare, start_time, public_key, regeneration_salt } = validation.data
 
   const canal =  await db.select<Canal>(new RecordId(user.table, user.id))
   if(canal.capacity - canal.usage <= 0){ throw new HTTPException(400, { message: 'Canal usage has reached maximum usage' }) }
@@ -519,7 +523,9 @@ canal.post('/bridges', verifyRequest(['sailor']), async c => {
     canal: canal.id,
     public_code: code,
     start_time: new Date(start),
-    end_time: new Date(end)
+    end_time: new Date(end),
+    public_key: public_key,
+    regeneration_salt: regeneration_salt
   }
   const [newBridge] = await db.query<[Bridge[], Canal[]]>(surql`CREATE bridge CONTENT ${bridgeContent}; UPDATE type::record(${canal.id.toString()}, 'canal') SET usage += ${billing.calculateSubpointForBridge(30).subpoints};`)
   return c.json(newBridge[0])
@@ -682,17 +688,19 @@ canal.get('/wave', verifyRequest(['seafarer']), async c => {
 
 canal.post('/wave', async c => {
   const schema = z.object({
-    anchor: z.string().trim().refine(val => val.length >= 10, { message: 'The anchor must be at least 10 characters long' }),
-    salt: z.string(),
+    anchor: z.string({message: 'Anchor is required'}),
+    salt: z.string({ message: 'Provide the salt used in your anchor hash' }),
     counterflare: z.string().trim().refine(val => {
       const words = val.split(/\s+/)
       return words.length === 2 && words.every((word) => word.length >= 4) && words.every((word) => word.length <= 15)
-    }, { message: 'Counterflare must be exactly two words, each of at least 4 but no more than characters long'}),
-    flare: z.string()
+    }, { message: 'Response flare must be exactly two words, each of at least 4 but no more than characters long'}),
+    flare: z.string({message: 'Flare is required'}),
+    public_key: z.string({message: 'Provide your public key'}),
+    regeneration_salt: z.string({message: 'Provide your key pair regeneration salt'})
   })
   
   const body = await c.req.json()
-  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare, salt: body.salt})
+  const validation = schema.safeParse({anchor: body.anchor, counterflare: body.counterflare, flare: body.flare, salt: body.salt, public_key: body.public_key, regeneration_salt: body.regeneration_salt})
 
   if(validation.success === false){ 
     const formatted = validation.error.format()
@@ -702,10 +710,12 @@ canal.post('/wave', async c => {
     if(formatted.counterflare){ formatted.counterflare?._errors.forEach(val => message += `${val}; `) }
     if(formatted.anchor){ formatted.anchor?._errors.forEach(val => message += `${val}; `) }
     if(formatted.salt){ formatted.salt?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.public_key){ formatted.public_key?._errors.forEach(val => message += `${val}; `) }
+    if(formatted.regeneration_salt){ formatted.regeneration_salt?._errors.forEach(val => message += `${val}; `) }
     throw new HTTPException(404, { message: message  }) 
   }
 
-  const { flare, counterflare, anchor, salt } = validation.data
+  const { flare, counterflare, anchor, salt, public_key, regeneration_salt } = validation.data
 
   const bridge = (await db.query<[Bridge[]]>(surql`SELECT * FROM bridge WHERE public_code = ${flare} LIMIT 1;`))[0][0]
   if(!bridge){ throw new HTTPException(400, { message: 'Action not allowed' }) }
@@ -714,7 +724,9 @@ canal.post('/wave', async c => {
   const waveContent = {
     secret_salt: salt,
     secret_code: anchor,
-    public_code: publicCode
+    public_code: publicCode,
+    public_key: public_key,
+    regeneration_salt: regeneration_salt
   }
   const newWave = (await db.query<[Wave[]]>(surql`CREATE wave CONTENT ${waveContent};`))[0][0]
   await db.query<[RequestsTo[]]>(surql`RELATE ${newWave.id}->requests_to->${bridge.id};`)
@@ -886,18 +898,26 @@ canal.get('/connection/:id', verifyRequest(['sailor', 'seafarer']), async c => {
   const wave = await db.select<Wave>(is_connected.in)
   const text = (await db.query<Array<ConversationWith[]>>(surql`SELECT * FROM conversation_with WHERE out = ${is_connected.id} ORDER created_at ASC LIMIT 100;`))[0]
   const [canal] = await db.query<Array<Canal>>(surql`SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${bridge.id} AND canal = ${bridge.canal};`)
+  const [total_storage] = await db.query<[number]>(surql`
+    RETURN math::sum(SELECT VALUE size FROM cargo WHERE canal = ${new RecordId('canal', user.id)} AND bridge = ${bridge.id} AND is_complete = ${true} AND is_independent = ${false});
+  `).catch(error => { throw new HTTPException(404, { message: error.message }) })
 
   return c.json({
     connection_id: is_connected.id,
     bridge_id: bridge.id,
+    bridge_key: bridge.public_key,
+    bridge_regeneration: bridge.regeneration_salt,
     wave_id: is_connected.in,
+    wave_key: wave.public_key,
+    wave_regeneration: wave.regeneration_salt,
     start_time: bridge.start_time,
     end_time: bridge.end_time,
     created_at: bridge.created_at,
     flare: bridge.public_code,
     counterflare: wave.public_code,
     is_premium: canal.is_premium,
-    messages: text
+    messages: text,
+    total_storage: total_storage
   })
 })
 
@@ -940,6 +960,9 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
     user_id = meet.in
   }
 
+  const bridge = await db.select<Bridge>(meet.out)
+  const [canal] = await db.query<Array<Canal>>(surql`SELECT VALUE canal.* FROM ONLY bridge WHERE id = ${bridge.id} AND canal = ${bridge.canal};`)
+
   const conversation = conversations.get(meet.id.toString()) ?? new Map<string, WSContext<WebSocket>>()
   const messages = all_messages.get(meet.id.toString()) ?? new Set<ConversationWith>()
   
@@ -965,7 +988,36 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
               has_attachment: msg.data.cargo ? true : false
             }
 
-            if(msg.data.cargo){ content.attachment = new RecordId('cargo', msg.data.cargo) }
+            if(msg.data.cargo){ 
+              content.attachment = new RecordId('cargo', msg.data.cargo)
+
+              const storage = (
+                await db.query<[number]>(surql`
+                  RETURN math::sum(SELECT VALUE size FROM cargo WHERE canal = ${canal.id} AND bridge = ${bridge.id} AND is_complete = ${true} AND is_independent = ${false});
+                `).catch(_error => { 
+                  ws.send(JSON.stringify({
+                    type: 'error',
+                    data: {
+                      from: user_id.toString(),
+                      message: 'Your message could be sent.',
+                      created_at: now
+                    }
+                  }))
+                })
+              )
+
+              if(storage){
+                broadcast({
+                  clients: conversation,
+                  sender: user_id.toString(),
+                  everywhere: true,
+                  message: JSON.stringify({
+                    type: 'storage',
+                    data: storage[0]
+                  })
+                })
+              }
+            }
 
             const saved = (await db.query<Array<ConversationWith[]>>(surql`
               RELATE ${user_id}->conversation_with->${meet.id} CONTENT ${content};
@@ -1075,7 +1127,7 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
     onOpen: (_event, ws) => {
 
       const now = new Date()
-      if(conversation.size >= 2 || conversation.has(user_id.toString())){ 
+      if(conversation.size >= 2 && !conversation.has(user_id.toString())){ 
         ws.send(JSON.stringify({
           type: 'error',
           data: {
@@ -1111,7 +1163,6 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onClose: (_event, _ws) => {
-      console.log('Close fires')
       const now = new Date()
       conversation.delete(user_id.toString())
       conversations.set(meet.id.toString(), conversation)
@@ -1133,7 +1184,6 @@ canal.get('/realtime/:id', verifyRequest(['sailor', 'seafarer']), async (c, next
 
     },
     onError: (_event, ws) => {
-      console.log('Error fires')
       const now = new Date()
       conversation.delete(user_id.toString())
       conversations.set(meet.id.toString(), conversation)
